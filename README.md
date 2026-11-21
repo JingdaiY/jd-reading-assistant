@@ -36,12 +36,23 @@ npm run preview   # 本地预览打包结果
 高亮颜色：🟨 暖黄 = 新词（还没复习过）；🟪 淡紫 = 已开始复习（学习中 / 复习 / 重新学习）。
 高亮只匹配完全相同的词（忽略大小写），不识别词形变化（标记 `atrophy` 不会高亮 `atrophies`）。
 
+### 书架与导入
+
+阅读页左上角「📚 书架 · 导入」按钮（`#/library`）；书架还是空的时候，示例文章末尾也有一张导入提示卡片：
+
+- **粘贴文本**：段落之间空一行；`Chapter 1`、`Part Two` 这类标题开头的段落自动分章
+- **上传 TXT**：自动把硬换行接回成段落、识别章节标题；Project Gutenberg 的 TXT 会自动去掉前后的版权声明；没有章节又很长的文本自动按 60 段分成若干部分
+- **上传 EPUB**：按 spine 顺序提取各章正文，读取书名和作者；**受 DRM 保护的 EPUB 会提示无法导入**（Kindle 电子书都带 DRM）
+- 多章节时右上角可选章节、底部上一章 / 下一章；每本书记住读到的章节和章内位置
+- 文件只在浏览器里解析，不上传；EPUB 解析用 JSZip（按需加载）
+- 暂不支持导入网页链接（浏览器不能跨域抓取其他网站，需要后端代理），可以复制正文后粘贴
+
 ### 在 iPhone / iPad 上使用
 
 - **点按单词**直接查词；**长按拖动**选词组 / 句子，停手约 0.4 秒后弹出。触屏上释义从**底部弹出卡片**（避开 iOS 自带的「拷贝 / 查询」菜单），单词被卡片挡住时页面自动上滚
 - 每日复习：点卡片任意位置翻面；触屏设备上不显示键盘快捷键提示
 - 支持「**添加到主屏幕**」（PWA）：Safari → 分享 → 添加到主屏幕，之后全屏打开
-- iOS 上 **Safari 和主屏幕 App 的数据互相独立**，建议固定从主屏幕图标打开；设备之间用 ⚙️ 导出 / 导入备份搬运
+- iOS 上 **Safari 和主屏幕 App 的数据互相独立**，建议固定从主屏幕图标打开；设备之间用 Google Drive 同步（见下文）
 
 ### 查词模式
 
@@ -74,14 +85,26 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 - 每次评分都立即写回 IndexedDB，中途离开不会丢进度
 - 本轮的复习队列在进入页面时生成，复习过程中新到期的词，下次进入时才会出现
 
-### 生词本备份（JSON）
+### Google Drive 同步
 
-备份需要**手动**操作，不会自动导出。点击右上角 ⚙️：
+导航栏右上角的**云朵图标**（或 ⚙️）→「连接 Google Drive」。云朵图标显示同步状态：灰色 = 未连接，绿色带勾 = 已同步，橙色带感叹号 = 授权过期或出错。每个用户用**自己的 Google 账号**授权，生词（含复习进度、删除记录）和文章库存到**他自己 Drive 的应用隐藏文件夹**（`appDataFolder`，文件名 `jd-reading-sync.json`；在 Drive 里看不到，只有本应用能读写）。网站不经手任何人的数据，请求从浏览器直接发给 Google。
 
-- **导出备份**：下载 `jd-reading-words-YYYY-MM-DD.json`，包含全部生词和复习进度
-- **从备份导入**：选择备份文件，**合并**进当前生词本。已存在的词（忽略大小写）跳过、保留本地记录；文件里缺失的字段自动补默认值
+- **授权**：Google Identity Services 的 token 模式（纯前端），权限只有 `drive.appdata`。access token 约 1 小时过期，存在 localStorage（`jdra.googleToken`）；过期后 ⚙️ 上出现小圆点，点「重新连接」
+- **何时同步**：打开应用时、本地数据变化后 3 秒（连续操作合并为一次）、切回页面时（距上次 30 秒以上）、手动「立即同步」
+- **合并规则**（`src/sync/merge.js`，备份导入也用这套）：逐条合并，生词按小写单词匹配、文章按 id 匹配；两边都有时 `updatedAt` 更新的那份胜出；删除是软删除（`deletedAt`），删除记录也会同步
+- **不同步**：API Key、查词模式等设置（每台设备单独设置）
+- 「断开」会撤销授权，本机和 Drive 上的数据都保留
+- Google Cloud 项目目前是**测试模式**：只有在 Google Cloud 后台「测试用户」名单里的账号能授权（最多 100 个）。要开放给所有人，需要发布应用并完成基础验证（隐私政策、首页、域名验证）
+- OAuth Client ID 写在 `src/sync/google.js`（Client ID 是公开信息）；已授权的 JavaScript 来源：线上域名和 `http://localhost:5173`
 
-**备份提醒**：有未备份的生词，并且满足下面任一条件时，⚙️ 右上角会出现橙色小圆点，菜单里也会显示「有 N 个生词还没备份」：
+### 手动备份（JSON）
+
+点击右上角 ⚙️：
+
+- **导出备份**：下载 `jd-reading-words-YYYY-MM-DD.json`，包含全部生词（含复习进度）和文章库
+- **从备份导入**：按和 Drive 同步相同的规则逐条合并（较新的胜出），文件里缺失的字段自动补默认值；兼容旧版（v1，只有生词）的备份文件
+
+**备份提醒**（只在没连接 Google Drive 时显示）：有未备份的生词，并且满足下面任一条件时，⚙️ 右上角会出现橙色小圆点，菜单里也会显示「有 N 个生词还没备份」：
 
 - 距离上次备份已满 **7 天**（从未备份过时，从最早那个生词的创建时间算起）
 - 未备份的生词达到 **20 个**
@@ -92,7 +115,7 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 
 日常数据存在浏览器 IndexedDB 中，刷新、重启 dev server、关闭浏览器、重启电脑都**不会丢**。IndexedDB 存在磁盘上、异步读写，几千上万个生词也只有几 MB，不会影响浏览器性能。
 
-以下情况会丢失或"看不到"，建议定期导出备份：
+以下情况会丢失或"看不到"，建议连接 Google Drive 同步，或定期导出备份：
 
 - 清除浏览器数据 / 站点数据、使用无痕模式
 - 换浏览器（每个浏览器各存各的）
@@ -103,13 +126,7 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 
 纯静态网站，可以免费部署到 Vercel：用 GitHub 账号登录 [vercel.com](https://vercel.com) → Add New Project → 导入 `jd-reading-assistant` 仓库 → Deploy。Vercel 会自动识别 Vite（构建命令 `npm run build`，输出目录 `dist`），无需任何配置；页面切换用 hash 路由（`#/review`），不需要配置重写规则。之后每次推送到 GitHub 都会自动重新部署。
 
-> ⚠️ **package-lock.json 只能包含公共 npm 源（`registry.npmjs.org`）的地址。** 如果本机 npm 配置了私有镜像源，`npm install` 新依赖后 lockfile 里会写入私有地址，Vercel 访问不了，安装时会报 `E401 Incorrect or missing password`。提交前检查：
->
-> ```bash
-> grep -o '"resolved": "https://[^/]*' package-lock.json | sort -u   # 应该只有 registry.npmjs.org
-> ```
->
-> 如果出现了其他域名，把它替换成 `https://registry.npmjs.org/` 即可（npm 默认的 `replace-registry-host=npmjs` 会在本机安装时自动换回本机配置的源，不影响本地开发）。
+> 项目根目录的 `.npmrc` 把 npm 源固定为公共源 `registry.npmjs.org`（覆盖本机的全局配置），保证 `package-lock.json` 里只有公共地址——lockfile 里如果出现私有镜像源的地址，Vercel 安装依赖时会报 `E401 Incorrect or missing password`。
 
 部署只上传网页文件，**生词本和 API Key 仍然只保存在各自设备的浏览器里**。注意：`*.vercel.app` 默认域名在中国大陆访问不稳定，OpenAI / Gemini 接口在中国大陆也无法访问。
 
@@ -138,6 +155,9 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 - [x] 接入 ts-fsrs，根据反馈（忘记 / 模糊 / 认识）更新调度参数并回写数据库
 - [x] 应用内「帮助」页：使用说明、高亮颜色含义、复习按钮逻辑、备份、快捷键（设计文档外新增）
 - [x] iPhone / iPad 适配：PWA（manifest、图标、全屏）、点按查词、触屏长按选词、底部释义卡片、窄屏导航栏、触屏复习（设计文档外新增，**尚未在真机上测试**）
+- [x] 书架与导入：粘贴文本、TXT、EPUB（检测 DRM）、按章节阅读、阅读进度（设计文档外新增）
+- [x] Google Drive 同步：每个用户存到自己 Drive 的应用隐藏文件夹，逐条合并（设计文档外新增，**尚未用真实 Google 账号测试**）
+- [ ] 导入网页链接（需要后端代理，暂不做）
 - [ ] 复习记录（review log）：暂未保存，以后要用 FSRS 优化器训练个人参数、或做复习统计时再加
 
 ## 技术栈
@@ -149,6 +169,8 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 | 本地数据库 | Dexie.js（IndexedDB）+ dexie-react-hooks |
 | 高亮 | mark.js |
 | 间隔重复 | ts-fsrs v5（FSRS 算法，开启 fuzz） |
+| 电子书解析 | JSZip（EPUB 解压，按需加载）+ 浏览器自带 DOMParser |
+| 云同步 | Google Identity Services（token 模式）+ Google Drive API v3（appDataFolder） |
 | 路由 | 自写的 hash 路由（无依赖，静态托管无需配置重写） |
 | AI 翻译 | 豆包（火山方舟）/ OpenAI / Gemini，BYOK，浏览器直连 |
 | 免费词典 | ECDICT 常用词版（内置，MIT）+ MyMemory 机器翻译（兜底） |
@@ -161,12 +183,13 @@ src/
 ├── main.jsx                     # 入口
 ├── index.css                    # Tailwind 入口、主题（字体/配色/动画）、高亮样式
 ├── components/
-│   ├── Navbar.jsx               # 吸顶导航栏：Logo、帮助 / 阅读 / 每日复习（角标）/ 模式、⚙️ 菜单（备份）
+│   ├── Navbar.jsx               # 吸顶导航栏：Logo、帮助 / 阅读 / 每日复习（角标）/ 模式、☁️ 同步状态、⚙️ 菜单（Drive 同步、备份）
 │   ├── ModeMenu.jsx             # 「模式」菜单：常规辞典 / AI Agent、服务商、API Key、模型、测试连接
-│   ├── Reader.jsx               # max-w-2xl 居中的衬线排版阅读区
+│   ├── Reader.jsx               # max-w-2xl 居中的衬线排版阅读区；章节选择、上一章 / 下一章
 │   └── SelectionTooltip.jsx     # 划词气泡：鼠标用浮动气泡（定位计算），触屏用底部弹出卡片
 ├── pages/
-│   ├── ReaderPage.jsx           # 阅读页：文章 + 划词气泡 + 高亮
+│   ├── ReaderPage.jsx           # 阅读页：当前文章 / 章节 + 划词气泡 + 高亮 + 阅读进度
+│   ├── LibraryPage.jsx          # 书架：文章列表、粘贴 / 上传导入、删除
 │   ├── ReviewPage.jsx           # 复习室：复习队列、英译中卡片、评分、快捷键
 │   └── HelpPage.jsx             # 帮助文档（阈值数字直接引用代码常量，避免与实际行为不一致）
 ├── hooks/
@@ -178,13 +201,20 @@ src/
 ├── srs/
 │   └── index.js                 # ts-fsrs 封装：记录 ↔ Card 转换、评分、间隔预览
 ├── db/
-│   ├── index.js                 # Dexie 数据库定义、生词增删、查询到期词、写回复习结果
-│   ├── backup.js                # 生词本 JSON 导出 / 导入
+│   ├── index.js                 # Dexie 数据库（v2）、生词增删（软删除）、查询到期词、写回复习结果
+│   ├── articles.js              # 文章库：增删、阅读进度、当前文章、内置示例文章
+│   ├── backup.js                # JSON 导出 / 导入（生词 + 文章库，逐条合并）
 │   └── backupReminder.js        # 备份提醒：上次备份时间、是否需要提醒
 ├── services/
+│   ├── importer.js              # 导入解析：粘贴文本 / TXT / EPUB → 章节和段落
 │   ├── translate.js             # 查词入口：按模式分发、结果缓存、useLookup hook
 │   ├── dictionary.js            # 常规辞典：ECDICT 内置词典（懒加载 + 词形还原）+ MyMemory 兜底（候选筛选）
 │   └── ai.js                    # AI Agent：豆包 / OpenAI / Gemini 请求、JSON 解析、错误提示
+├── sync/
+│   ├── index.js                 # 同步流程（下载 → 合并 → 写本地 → 上传）、自动同步、状态
+│   ├── google.js                # Google 授权（GIS）+ Drive 接口；OAuth Client ID
+│   ├── merge.js                 # 逐条合并规则（Drive 同步和备份导入共用）
+│   └── events.js                # 本地数据变化通知（触发自动同步）
 ├── settings/
 │   └── index.js                 # 查词模式设置（localStorage）+ useSettings
 └── data/
@@ -216,7 +246,9 @@ python3 scripts/build-dict.py ecdict.csv public/dict/ecdict-common.json
 
 ## 数据结构
 
-IndexedDB 数据库 `jd-reading-assistant`，表 `words`（索引：`id, word, due, state, createdAt`）：
+IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v2），两张表：`words`（索引：`id, word, due, state, createdAt, updatedAt`）和 `articles`（索引：`id, updatedAt`）。
+
+生词 `words`：
 
 ```js
 {
@@ -243,10 +275,30 @@ IndexedDB 数据库 `jd-reading-assistant`，表 `words`（索引：`id, word, d
   learningSteps: 0,   // 当前处于第几个学习步骤
   scheduledDays: 0,
   elapsedDays: 0,
+
+  // v2：多设备同步
+  updatedAt: "2026-11-19T07:03:09.281Z", // 最后修改时间（标记、复习、删除都会更新），同步时较新的胜出
+  deletedAt: null,                        // 取消标记时设为删除时间（软删除），所有查询都会过滤掉
 }
 ```
 
-阶段三之前创建的旧记录没有这 5 个补充字段，读取时会自动补默认值，可以正常复习。
+文章 `articles`：
+
+```js
+{
+  id: "uuid",
+  title: "The Little Test Book",
+  author: "Jane Author",            // EPUB 才有
+  kind: "epub",                     // paste / txt / epub
+  chapters: [{ title: "Chapter One", paragraphs: ["...", "..."] }],
+  progress: { chapter: 1, ratio: 0.42 }, // 读到第几章（从 0 开始）、章内滚动位置
+  createdAt, updatedAt, deletedAt,  // 删除时清空 chapters，只留删除记录
+}
+```
+
+内置示例文章不存数据库（id 为 `sample`），不参与同步。当前打开的文章存在 localStorage（`jdra.currentArticle`），每台设备各自记。
+
+阶段三之前创建的旧记录没有这 5 个补充字段，读取时会自动补默认值，可以正常复习。v1 数据库升级到 v2 时，会给旧记录补上 `updatedAt`（取上次复习时间或创建时间）和 `deletedAt: null`。
 
 同一个词忽略大小写去重。调试时可在浏览器 DevTools → Application → IndexedDB 中查看 / 删除数据。
 
@@ -255,10 +307,11 @@ IndexedDB 数据库 `jd-reading-assistant`，表 `words`（索引：`id, word, d
 ```js
 {
   "app": "jd-reading-assistant",
-  "version": 1,
+  "version": 2,                       // v1 只有 words
   "exportedAt": "2026-11-18T23:10:00.000Z",
   "count": 2,
-  "words": [ /* 上面的生词记录 */ ]
+  "words": [ /* 生词记录（不含已删除的） */ ],
+  "articles": [ /* 文章记录 */ ]
 }
 ```
 
@@ -266,8 +319,11 @@ IndexedDB 数据库 `jd-reading-assistant`，表 `words`（索引：`id, word, d
 
 ## 已知限制
 
-- mark.js 会直接修改 DOM。当前文章内容是静态的所以没问题；以后支持切换 / 导入文章时，需要在内容变化前先 `unmark`
-- 备份需要手动导出，没有自动备份（纯前端无法在后台写本地文件），只能靠提醒
+- mark.js 会直接修改 DOM；切换文章 / 章节时用 key 让整个 `<article>` 重新挂载，避免和 React 冲突
+- 不连接 Google Drive 时只能手动导出备份（纯前端无法在后台写本地文件），只能靠提醒
+- Google Drive 同步只用模拟的 Google 接口测过（两台设备合并、删除同步、授权过期、401），还没用真实 Google 账号验证；iPhone 主屏幕 App 里 Google 授权弹窗能否正常工作需要真机确认
+- 同步是“最后修改的胜出”：同一个词在两台设备上离线各复习了一次，只会保留后同步的那次；同步文件是一个完整 JSON，书很多时上传会变慢
+- 生词出处只记录文章标题，删除文章后生词仍保留
 - 备份提醒只统计"新增"的词；取消标记（删除）不算作需要备份的变更
 - 高亮不识别词形变化；生词很多时，每次增删都要重新全文匹配一遍，是潜在的性能瓶颈
 - 常规辞典不结合上下文，会列出所有词性的释义，需要自己判断是哪个意思（例如 `atrophies` 在原句里是动词，ECDICT 只收了名词义）

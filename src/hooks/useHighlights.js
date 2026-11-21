@@ -9,10 +9,10 @@ const LIMITERS = [',', '.', ';', ':', '!', '?', '"', "'", '“', '”', '‘', '
  * 根据生词本，在 containerRef 内的文章里用 <mark> 高亮所有已保存的词。
  * 生词本变化时（新增/取消标记）先清掉旧高亮再重新标记。
  *
- * 注意：mark.js 会直接改 DOM（拆分文本节点）。这里的文章段落渲染后不再变化，
- * 所以和 React 共存没问题；以后如果段落内容会动态更新，需要在更新前先 unmark。
+ * 注意：mark.js 会直接改 DOM（拆分文本节点）。正文段落渲染后不再变化；切换文章 / 章节时，
+ * Reader 用 key 让整个 <article> 重新挂载（而不是逐段更新），所以不会和 React 的 DOM 更新冲突。
  */
-export function useHighlights(containerRef, words) {
+export function useHighlights(containerRef, words, contentKey) {
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -36,5 +36,6 @@ export function useHighlights(containerRef, words) {
     })
 
     return () => marker.unmark()
-  }, [containerRef, words])
+    // contentKey：切换文章 / 章节时正文会重新渲染，需要重新标记
+  }, [containerRef, words, contentKey])
 }

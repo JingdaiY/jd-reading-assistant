@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { exportWords, importWords } from '../db/backup'
 import { formatAgo, getBackupStatus, getLastBackupAt } from '../db/backupReminder'
 import { usePopover } from '../hooks/usePopover'
+import { connect, disconnect, syncNow, useSyncState } from '../sync'
 import ModeMenu from './ModeMenu'
 
 function GearIcon() {
@@ -17,6 +18,23 @@ function GearIcon() {
   )
 }
 
+/** 云朵图标：未连接 = 空心；已同步 = 带勾；同步中 = 带箭头；需要处理 = 带感叹号 */
+function CloudIcon({ status, connected }) {
+  const mark = !connected
+    ? null
+    : status === 'syncing'
+      ? <path strokeLinecap="round" strokeLinejoin="round" d="M12 11v5m0-5-2 2m2-2 2 2" />
+      : status === 'expired' || status === 'error'
+        ? <path strokeLinecap="round" d="M12 10.5v3m0 2.2v.1" />
+        : <path strokeLinecap="round" strokeLinejoin="round" d="m9.5 13.5 1.8 1.8 3.4-3.6" />
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-[18px]">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 18.5h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 7.1 9.1 4.75 4.75 0 0 0 7 18.5Z" />
+      {mark}
+    </svg>
+  )
+}
+
 function MenuItem({ children, hint, ...props }) {
   return (
     <button
@@ -27,6 +45,62 @@ function MenuItem({ children, hint, ...props }) {
       {children}
       {hint && <span className="text-xs text-stone-400">{hint}</span>}
     </button>
+  )
+}
+
+const SYNC_LABEL = { syncing: '同步中…', ok: '已同步', expired: '授权已过期', error: '同步出错' }
+
+/** ⚙️ 菜单里的 Google Drive 同步区域 */
+function SyncSection({ sync }) {
+  const smallBtn = 'rounded-md px-2.5 py-1.5 text-xs font-medium transition active:scale-95'
+  if (!sync.connected) {
+    return (
+      <div className="mx-1 mb-1.5 rounded-lg bg-stone-50 p-3">
+        <p className="text-xs leading-relaxed text-stone-500">
+          把生词本、复习进度和文章库同步到<strong className="text-stone-700">你自己的 Google Drive</strong>
+          （隐藏的应用文件夹），在多台设备之间自动同步。
+        </p>
+        <button type="button" onClick={connect} className={`mt-2.5 bg-ink text-white hover:bg-stone-700 ${smallBtn}`}>
+          连接 Google Drive
+        </button>
+        {sync.error && <p className="mt-2 text-xs text-rose-600">{sync.error}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="mx-1 mb-1.5 rounded-lg bg-stone-50 p-3">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="font-medium text-stone-600">Google Drive 同步</span>
+        <span className={sync.status === 'expired' || sync.status === 'error' ? 'text-amber-600' : 'text-stone-400'}>
+          {SYNC_LABEL[sync.status] ?? ''}
+          {sync.status === 'ok' && sync.lastSyncAt && ` · ${new Date(sync.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+        </span>
+      </div>
+      {sync.error && <p className="mt-1.5 text-xs text-rose-600">{sync.error}</p>}
+      <div className="mt-2.5 flex gap-1.5">
+        {sync.status === 'expired' ? (
+          <button type="button" onClick={connect} className={`bg-ink text-white hover:bg-stone-700 ${smallBtn}`}>
+            重新连接
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={syncNow}
+            disabled={sync.status === 'syncing'}
+            className={`bg-ink text-white hover:bg-stone-700 disabled:bg-stone-300 ${smallBtn}`}
+          >
+            立即同步
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => window.confirm('断开 Google Drive？本机和 Drive 上已有的数据都会保留，只是不再自动同步。') && disconnect()}
+          className={`text-stone-500 hover:bg-stone-200 ${smallBtn}`}
+        >
+          断开
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -47,7 +121,11 @@ function NavLink({ href, active, children }) {
 export default function Navbar({ words, dueCount, route }) {
   const { open, setOpen, ref: menuRef } = usePopover()
   const [lastBackupAt, setLastBackupAt] = useState(getLastBackupAt)
-  const backup = getBackupStatus(words, lastBackupAt)
+  const sync = useSyncState()
+  // 已连接 Drive 自动同步时，不再提醒手动备份
+  const backup = sync.connected ? { needsBackup: false } : getBackupStatus(words, lastBackupAt)
+  // 授权过期需要用户点「重新连接」：在 ⚙️ 上也显示提醒圆点
+  const needsAttention = backup.needsBackup || sync.status === 'expired'
   const [message, setMessage] = useState(null) // { type: 'ok' | 'error', text }
   const fileRef = useRef(null)
 
@@ -62,9 +140,10 @@ export default function Navbar({ words, dueCount, route }) {
     e.target.value = '' // 清空，保证同一个文件可以重复选择
     if (!file) return
     try {
-      const { added, skipped } = await importWords(file)
+      const { added, updated, skipped, articles } = await importWords(file)
       setLastBackupAt(getLastBackupAt())
-      setMessage({ type: 'ok', text: `导入 ${added} 个${skipped ? `，跳过 ${skipped} 个重复/无效` : ''}` })
+      const parts = [`新增 ${added} 个`, updated && `更新 ${updated} 个`, articles && `文章 ${articles} 篇`, skipped && `跳过 ${skipped} 个无效`]
+      setMessage({ type: 'ok', text: `导入完成：${parts.filter(Boolean).join('，')}` })
     } catch (err) {
       setMessage({ type: 'error', text: `导入失败：${err.message}` })
     }
@@ -85,7 +164,7 @@ export default function Navbar({ words, dueCount, route }) {
           <NavLink href="#/help" active={route === 'help'}>
             帮助
           </NavLink>
-          <NavLink href="#/" active={route !== 'review' && route !== 'help'}>
+          <NavLink href="#/" active={route === 'read' || route === 'library'}>
             阅读
           </NavLink>
           <NavLink href="#/review" active={route === 'review'}>
@@ -98,14 +177,33 @@ export default function Navbar({ words, dueCount, route }) {
             )}
           </NavLink>
           <ModeMenu />
-          <span className="mx-1 h-4 w-px bg-stone-200 sm:mx-1.5" />
+          <span className="mx-1 h-4 w-px bg-stone-200 max-[400px]:hidden sm:mx-1.5" />
 
-        <div ref={menuRef} className="relative">
+        <div ref={menuRef} className="relative flex items-center">
+          {/* 同步状态：一眼看出有没有连接 Drive，点击打开同一个菜单 */}
           <button
             type="button"
-            aria-label={backup.needsBackup ? '设置（有生词未备份）' : '设置'}
+            aria-label={sync.connected ? `Google Drive 同步：${SYNC_LABEL[sync.status] ?? ''}` : '连接 Google Drive 同步'}
+            title={sync.connected ? `Google Drive：${SYNC_LABEL[sync.status] ?? ''}` : '连接 Google Drive，在多台设备间同步'}
+            onClick={() => {
+              setOpen((v) => !v)
+              setMessage(null)
+            }}
+            className={`rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 ${
+              sync.status === 'expired' || sync.status === 'error'
+                ? 'text-amber-600'
+                : sync.connected
+                  ? 'text-emerald-600'
+                  : 'text-stone-400'
+            }`}
+          >
+            <CloudIcon status={sync.status} connected={sync.connected} />
+          </button>
+          <button
+            type="button"
+            aria-label={needsAttention ? '设置（需要处理）' : '设置'}
             aria-expanded={open}
-            title={backup.needsBackup ? `有 ${backup.unsavedCount} 个生词未备份` : '设置'}
+            title={sync.status === 'expired' ? 'Google Drive 授权已过期' : backup.needsBackup ? `有 ${backup.unsavedCount} 个生词未备份` : '设置'}
             onClick={() => {
               setOpen((v) => !v)
               setMessage(null)
@@ -115,8 +213,8 @@ export default function Navbar({ words, dueCount, route }) {
             }`}
           >
             <GearIcon />
-            {/* 备份提醒小圆点 */}
-            {backup.needsBackup && (
+            {/* 备份 / 同步提醒小圆点 */}
+            {needsAttention && (
               <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-amber-500 ring-2 ring-paper" />
             )}
           </button>
@@ -130,6 +228,8 @@ export default function Navbar({ words, dueCount, route }) {
                 <span className="font-medium tracking-wide uppercase">生词本 · {words.length} 个</span>
                 <span>上次备份：{formatAgo(lastBackupAt)}</span>
               </div>
+
+              <SyncSection sync={sync} />
 
               {backup.needsBackup && (
                 <div className="mx-1 mb-1 rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-800">

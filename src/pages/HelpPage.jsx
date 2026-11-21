@@ -54,11 +54,12 @@ function Note({ children }) {
 }
 
 const TOC = [
+  ['library', '书架与导入'],
   ['reading', '划词与标记'],
   ['mode', '查词模式'],
   ['highlights', '高亮颜色'],
   ['review', '每日复习'],
-  ['backup', '数据与备份'],
+  ['backup', '同步与备份'],
   ['mobile', 'iPhone / iPad'],
   ['shortcuts', '快捷键'],
 ]
@@ -84,6 +85,27 @@ export default function HelpPage() {
       </nav>
 
       <div className="mt-12 space-y-14">
+        <Section id="library" title="书架与导入">
+          <p>
+            阅读页左上角点「📚 书架 · 导入」进入书架，可以导入自己的阅读材料，点书名打开：
+          </p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              <strong className="text-stone-800">粘贴文本</strong>：段落之间空一行；以 Chapter 1、Part Two 这类标题开头的段落会自动分章
+            </li>
+            <li>
+              <strong className="text-stone-800">上传 TXT</strong>：自动把硬换行接回成段落，识别章节标题；Project Gutenberg 的 TXT 会自动去掉前后的版权声明
+            </li>
+            <li>
+              <strong className="text-stone-800">上传 EPUB</strong>：按章节阅读，读取书名和作者
+            </li>
+          </ul>
+          <p>有多个章节时，阅读页右上角可以选择章节，底部可以翻到上一章 / 下一章。每本书会记住读到的章节和位置。</p>
+          <Note>
+            文件只在浏览器里解析，不会上传。Kindle 等受 DRM 保护的电子书无法导入；只支持没有 DRM 的 EPUB（例如 Project Gutenberg 的公版书），也可以复制段落后粘贴。暂不支持导入网页链接，可以复制网页正文后粘贴。
+          </Note>
+        </Section>
+
         <Section id="reading" title="划词与标记">
           <ol className="list-decimal space-y-2 pl-5">
             <li>
@@ -224,18 +246,25 @@ export default function HelpPage() {
           <Note>每次评分都会立即保存，中途离开不会丢进度。本轮队列在进入页面时生成，复习中途新到期的词下次进入时才会出现。</Note>
         </Section>
 
-        <Section id="backup" title="数据与备份">
+        <Section id="backup" title="同步与备份">
           <p>
-            生词本保存在<strong className="text-stone-800">当前浏览器</strong>
-            里（IndexedDB），刷新、关闭浏览器、重启电脑都不会丢。但清除浏览器数据、使用无痕模式、换浏览器时会看不到。
+            所有数据默认保存在<strong className="text-stone-800">当前浏览器</strong>
+            里，刷新、关闭浏览器、重启电脑都不会丢；但换一台设备、换一个浏览器，或者清除浏览器数据后就看不到了。
           </p>
           <p>
-            点击右上角 ⚙️ 可以<strong className="text-stone-800">导出备份</strong>（JSON 文件）或
-            <strong className="text-stone-800">从备份导入</strong>（合并，已有的词会跳过）。备份需要手动操作。
+            <strong className="text-stone-800">Google Drive 同步（推荐）</strong>：点右上角的云朵图标（或 ⚙️）→「连接 Google Drive」，用你自己的 Google 账号授权。云朵是绿色带勾表示已同步，橙色表示需要重新连接。生词本、复习进度和文章库会存到
+            <strong className="text-stone-800">你自己 Drive 里的隐藏应用文件夹</strong>
+            （在 Drive 里看不到，只有本应用能读写），在每台设备上连接同一个 Google 账号就会自动同步：打开应用时、标记 / 复习后约 3 秒、切回页面时。
           </p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>按单词逐条合并：同一个词在两台设备上都改过时，最后修改的那份生效</li>
+            <li>API Key 和查词模式不同步，每台设备单独设置</li>
+            <li>授权约 1 小时过期，过期后 ⚙️ 上会出现小圆点，点「重新连接」即可</li>
+            <li>「断开」只是停止同步，本机和 Drive 上的数据都会保留</li>
+          </ul>
           <p>
-            当有未备份的生词，且距上次备份满 {REMIND_AFTER_DAYS} 天、或未备份的词达到 {REMIND_AFTER_WORDS}{' '}
-            个时，⚙️ 上会出现橙色小圆点提醒你备份。
+            <strong className="text-stone-800">手动备份</strong>：⚙️ 里也可以「导出备份」（JSON 文件，包含生词和文章库）或「从备份导入」（同样按最后修改时间逐条合并）。没有连接 Google Drive 时，如果有未备份的生词，且距上次备份满{' '}
+            {REMIND_AFTER_DAYS} 天、或未备份的词达到 {REMIND_AFTER_WORDS} 个，⚙️ 上会出现橙色小圆点提醒你备份。
           </p>
         </Section>
 
@@ -254,7 +283,7 @@ export default function HelpPage() {
             <strong className="text-stone-800">添加到主屏幕</strong>：用 Safari 打开本网站 → 点底部的「分享」按钮 → 「添加到主屏幕」。之后从桌面图标打开，会像 App 一样全屏显示。
           </p>
           <Note>
-            iOS 上 Safari 和主屏幕 App 的数据是分开的：在 Safari 里标记的词，从主屏幕图标打开时看不到。建议一开始就固定从主屏幕图标打开使用。电脑和手机之间的数据也不互通，可以用 ⚙️ 里的导出 / 导入备份来搬运（例如用 AirDrop 把备份文件发到手机，存到「文件」后再导入）。
+            iOS 上 Safari 和主屏幕 App 的数据是分开的：在 Safari 里标记的词，从主屏幕图标打开时看不到。建议一开始就固定从主屏幕图标打开使用。要在电脑和手机之间同步，在每台设备上都连接同一个 Google Drive 即可（见上一节）。
           </Note>
         </Section>
 

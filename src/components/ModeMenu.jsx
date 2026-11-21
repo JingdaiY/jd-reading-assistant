@@ -166,7 +166,8 @@ export default function ModeMenu() {
         }`}
       >
         模式
-        <span className="rounded bg-stone-100 px-1.5 py-px text-[11px] text-stone-500">{modeLabel(settings)}</span>
+        {/* 特别窄的屏幕（iPhone SE 等）上隐藏当前模式的小标签，避免导航栏挤不下 */}
+        <span className="rounded bg-stone-100 px-1.5 py-px text-[11px] text-stone-500 max-[400px]:hidden">{modeLabel(settings)}</span>
         {aiIncomplete && <span className="absolute top-1 right-1 size-2 rounded-full bg-amber-500 ring-2 ring-paper" />}
       </button>
 

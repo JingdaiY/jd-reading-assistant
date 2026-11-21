@@ -1,18 +1,23 @@
-import { createWordRecord, db } from '.'
+import { createWordRecord, db, isActive } from '.'
+import { markDirty } from '../sync/events'
+import { articleKey, mergeRecords, wordKey } from '../sync/merge'
 import { getLastBackupAt, setLastBackupAt } from './backupReminder'
 
 const APP_ID = 'jd-reading-assistant'
-const BACKUP_VERSION = 1
+// v1：只有 words；v2：words + articles
+const BACKUP_VERSION = 2
 
-/** 把整个生词本导出为 JSON 文件并触发浏览器下载 */
+/** 把生词本和文章库导出为 JSON 文件并触发浏览器下载 */
 export async function exportWords() {
-  const words = await db.words.orderBy('createdAt').toArray()
+  const words = (await db.words.orderBy('createdAt').toArray()).filter(isActive)
+  const articles = (await db.articles.toArray()).filter(isActive)
   const backup = {
     app: APP_ID,
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     count: words.length,
     words,
+    articles,
   }
 
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
@@ -26,13 +31,23 @@ export async function exportWords() {
   return words.length
 }
 
+/** 补齐缺失字段：兼容旧版本 / 手改过的备份文件 */
+function normalizeWord(item) {
+  const word = typeof item?.word === 'string' ? item.word.trim() : ''
+  if (!word) return null
+  const base = createWordRecord({ word })
+  return { ...base, ...item, word, updatedAt: item.updatedAt ?? item.lastReview ?? item.createdAt ?? base.updatedAt }
+}
+
+function normalizeArticle(item) {
+  if (!item?.id || !Array.isArray(item.chapters)) return null
+  return { progress: { chapter: 0, ratio: 0 }, deletedAt: null, ...item, updatedAt: item.updatedAt ?? item.createdAt }
+}
+
 /**
- * 从 JSON 备份文件导入生词，合并进现有生词本。
- * - 同一个词（忽略大小写）已存在时跳过，保留本地记录（本地的复习进度更可信）
- * - 缺失的字段用默认值补齐，避免旧版本 / 手改过的文件导致数据残缺
- * - 文件的导出时间比本地记录的“上次备份”更新时，更新它：这些词本来就在备份文件里，
- *   否则在新浏览器里恢复备份后会立刻被提醒“该备份了”
- * 返回 { added, skipped }
+ * 从 JSON 备份文件导入，逐条合并进现有数据（和 Google Drive 同步用同一套规则）：
+ * 同一个词两边都有时，最后修改时间更新的那份胜出（所以复习进度也会合并）。
+ * 返回 { added, updated, skipped, articles }
  */
 export async function importWords(file) {
   let data
@@ -45,32 +60,27 @@ export async function importWords(file) {
   const items = Array.isArray(data) ? data : data?.words
   if (!Array.isArray(items)) throw new Error('文件里没有找到生词列表')
 
-  return db.transaction('rw', db.words, async () => {
-    const existing = await db.words.toArray()
-    const seenWords = new Set(existing.map((w) => w.word.toLowerCase()))
-    const seenIds = new Set(existing.map((w) => w.id))
+  const incomingWords = items.map(normalizeWord).filter(Boolean)
+  const skipped = items.length - incomingWords.length
+  const incomingArticles = (Array.isArray(data?.articles) ? data.articles : []).map(normalizeArticle).filter(Boolean)
 
-    const toAdd = []
-    let skipped = 0
-    for (const item of items) {
-      const word = typeof item?.word === 'string' ? item.word.trim() : ''
-      if (!word || seenWords.has(word.toLowerCase())) {
-        skipped++
-        continue
-      }
-      const record = { ...createWordRecord({ word }), ...item, word }
-      if (!record.id || seenIds.has(record.id)) record.id = crypto.randomUUID()
-      seenWords.add(word.toLowerCase())
-      seenIds.add(record.id)
-      toAdd.push(record)
-    }
+  const result = await db.transaction('rw', db.words, db.articles, async () => {
+    const localWords = await db.words.toArray()
+    const localKeys = new Set(localWords.map(wordKey))
+    const w = mergeRecords(localWords, incomingWords, wordKey)
+    await db.words.bulkPut(w.localWrites)
 
-    await db.words.bulkAdd(toAdd)
+    const a = mergeRecords(await db.articles.toArray(), incomingArticles, articleKey)
+    await db.articles.bulkPut(a.localWrites)
 
-    const exportedAt = !Array.isArray(data) && Date.parse(data.exportedAt) ? data.exportedAt : null
-    const last = getLastBackupAt()
-    if (exportedAt && (!last || Date.parse(exportedAt) > Date.parse(last))) setLastBackupAt(exportedAt)
-
-    return { added: toAdd.length, skipped }
+    const added = w.localWrites.filter((r) => !localKeys.has(wordKey(r))).length
+    return { added, updated: w.localWrites.length - added, skipped, articles: a.localWrites.length }
   })
+
+  const exportedAt = !Array.isArray(data) && Date.parse(data.exportedAt) ? data.exportedAt : null
+  const last = getLastBackupAt()
+  if (exportedAt && (!last || Date.parse(exportedAt) > Date.parse(last))) setLastBackupAt(exportedAt)
+
+  markDirty()
+  return result
 }
