@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { exportWords, importWords } from '../db/backup'
 import { formatAgo, getBackupStatus, getLastBackupAt } from '../db/backupReminder'
 import { usePopover } from '../hooks/usePopover'
-import { connect, disconnect, syncNow, useSyncState } from '../sync'
+import { connect, disconnect, downloadCloudFile, getCloudSummary, syncNow, useSyncState } from '../sync'
 import ModeMenu from './ModeMenu'
 
 function GearIcon() {
@@ -50,8 +50,58 @@ function MenuItem({ children, hint, ...props }) {
 
 const SYNC_LABEL = { syncing: '同步中…', ok: '已同步', expired: '授权已过期', error: '同步出错' }
 
+const formatBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
+
+/** 「查看云端数据」：读取 Drive 上的同步文件，和本机对比，可下载原始文件 */
+function CloudPanel() {
+  const [info, setInfo] = useState({ status: 'loading' })
+  useEffect(() => {
+    let alive = true
+    getCloudSummary()
+      .then((r) => alive && setInfo({ status: 'done', ...r }))
+      .catch((err) => alive && setInfo({ status: 'error', error: err.message }))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (info.status === 'loading') return <p className="mt-2.5 text-xs text-stone-400">正在读取云端数据…</p>
+  if (info.status === 'error') return <p className="mt-2.5 text-xs text-rose-600">读取失败：{info.error}</p>
+  const { cloud, local, raw } = info
+  const same = cloud && cloud.words === local.words && cloud.articles === local.articles
+  return (
+    <div className="mt-2.5 rounded-md border border-stone-200 bg-white p-2.5 text-xs leading-relaxed text-stone-600">
+      {cloud ? (
+        <>
+          <p>
+            <span className="text-stone-400">云端：</span>
+            {cloud.words} 个生词 · {cloud.articles} 篇文章
+            {cloud.deletedWords > 0 && <span className="text-stone-400">（另有 {cloud.deletedWords} 条删除记录）</span>}
+          </p>
+          <p>
+            <span className="text-stone-400">本机：</span>
+            {local.words} 个生词 · {local.articles} 篇文章
+          </p>
+          <p className="mt-1 text-stone-400">
+            {cloud.updatedAt && `云端更新于 ${new Date(cloud.updatedAt).toLocaleString()} · `}文件大小 {formatBytes(cloud.bytes)}
+          </p>
+          <p className={`mt-1 ${same ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {same ? '✓ 本机和云端一致' : '本机和云端数量不同：点「立即同步」后再查看'}
+          </p>
+          <button type="button" onClick={() => downloadCloudFile(raw)} className="mt-2 text-stone-500 underline hover:text-stone-800">
+            下载云端原始文件（.json）
+          </button>
+        </>
+      ) : (
+        <p>云端还没有同步文件，点「立即同步」上传本机数据。</p>
+      )}
+    </div>
+  )
+}
+
 /** ⚙️ 菜单里的 Google Drive 同步区域 */
 function SyncSection({ sync }) {
+  const [showCloud, setShowCloud] = useState(false)
   const smallBtn = 'rounded-md px-2.5 py-1.5 text-xs font-medium transition active:scale-95'
   if (!sync.connected) {
     return (
@@ -92,6 +142,16 @@ function SyncSection({ sync }) {
             立即同步
           </button>
         )}
+        {sync.status !== 'expired' && (
+          <button
+            type="button"
+            aria-expanded={showCloud}
+            onClick={() => setShowCloud((v) => !v)}
+            className={`text-stone-600 hover:bg-stone-200 ${showCloud ? 'bg-stone-200' : ''} ${smallBtn}`}
+          >
+            查看云端数据
+          </button>
+        )}
         <button
           type="button"
           onClick={() => window.confirm('断开 Google Drive？本机和 Drive 上已有的数据都会保留，只是不再自动同步。') && disconnect()}
@@ -100,6 +160,8 @@ function SyncSection({ sync }) {
           断开
         </button>
       </div>
+      {/* key：每次同步完成后重新读取，保证显示的是最新数据 */}
+      {showCloud && sync.status !== 'expired' && <CloudPanel key={sync.lastSyncAt} />}
     </div>
   )
 }
@@ -109,7 +171,7 @@ function NavLink({ href, active, children }) {
     <a
       href={href}
       aria-current={active ? 'page' : undefined}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm whitespace-nowrap outline-none sm:px-2.5 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-stone-300 ${
+      className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm whitespace-nowrap outline-none max-[400px]:px-1.5 sm:px-2.5 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-stone-300 ${
         active ? 'text-stone-900' : 'text-stone-500'
       }`}
     >
@@ -151,7 +213,7 @@ export default function Navbar({ words, dueCount, route }) {
 
   return (
     <header className="sticky top-0 z-10 border-b border-stone-200/60 bg-paper/80 backdrop-blur">
-      <nav className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+      <nav className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 max-[400px]:px-3 sm:px-6">
         <a href="#/" className="flex items-center gap-2.5">
           <span className="flex size-7 items-center justify-center rounded-md bg-ink text-xs font-semibold tracking-tight text-paper">
             JD
@@ -176,6 +238,10 @@ export default function Navbar({ words, dueCount, route }) {
               </span>
             )}
           </NavLink>
+          <NavLink href="#/vocab" active={route === 'vocab'}>
+            <span className="sm:hidden">词汇</span>
+            <span className="hidden sm:inline">词汇库</span>
+          </NavLink>
           <ModeMenu />
           <span className="mx-1 h-4 w-px bg-stone-200 max-[400px]:hidden sm:mx-1.5" />
 
@@ -189,7 +255,7 @@ export default function Navbar({ words, dueCount, route }) {
               setOpen((v) => !v)
               setMessage(null)
             }}
-            className={`rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 ${
+            className={`rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 max-[400px]:p-1.5 ${
               sync.status === 'expired' || sync.status === 'error'
                 ? 'text-amber-600'
                 : sync.connected
@@ -208,7 +274,7 @@ export default function Navbar({ words, dueCount, route }) {
               setOpen((v) => !v)
               setMessage(null)
             }}
-            className={`relative rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 ${
+            className={`relative rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 max-[400px]:p-1.5 ${
               open ? 'bg-stone-100 text-stone-700' : 'text-stone-400'
             }`}
           >
@@ -225,7 +291,9 @@ export default function Navbar({ words, dueCount, route }) {
               className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 origin-top-right animate-pop sm:w-64 rounded-xl border border-stone-200/80 bg-white p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.08)]"
             >
               <div className="flex items-baseline justify-between px-2.5 pt-1.5 pb-2 text-[11px] text-stone-400">
-                <span className="font-medium tracking-wide uppercase">生词本 · {words.length} 个</span>
+                <a href="#/vocab" onClick={() => setOpen(false)} className="font-medium tracking-wide uppercase hover:text-stone-700">
+                  生词本 · {words.length} 个 ›
+                </a>
                 <span>上次备份：{formatAgo(lastBackupAt)}</span>
               </div>
 

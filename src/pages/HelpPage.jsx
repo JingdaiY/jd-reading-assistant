@@ -59,6 +59,7 @@ const TOC = [
   ['mode', '查词模式'],
   ['highlights', '高亮颜色'],
   ['review', '每日复习'],
+  ['vocab', '词汇库'],
   ['backup', '同步与备份'],
   ['mobile', 'iPhone / iPad'],
   ['shortcuts', '快捷键'],
@@ -100,7 +101,10 @@ export default function HelpPage() {
               <strong className="text-stone-800">上传 EPUB</strong>：按章节阅读，读取书名和作者
             </li>
           </ul>
-          <p>有多个章节时，阅读页右上角可以选择章节，底部可以翻到上一章 / 下一章。每本书会记住读到的章节和位置。</p>
+          <p>
+            有多个章节时，阅读页右上角可以选择章节。很长的章节会自动分页（每页约 1800 词），底部显示「第 x / n 页」，点「下一页」翻页，翻到最后一页时变成「下一章」；电脑上也可以按键盘
+            <Kbd>←</Kbd> <Kbd>→</Kbd> 翻页。每本书会记住读到的章节、页码和位置。
+          </p>
           <Note>
             文件只在浏览器里解析，不会上传。Kindle 等受 DRM 保护的电子书无法导入；只支持没有 DRM 的 EPUB（例如 Project Gutenberg 的公版书），也可以复制段落后粘贴。暂不支持导入网页链接，可以复制网页正文后粘贴。
           </Note>
@@ -246,6 +250,29 @@ export default function HelpPage() {
           <Note>每次评分都会立即保存，中途离开不会丢进度。本轮队列在进入页面时生成，复习中途新到期的词下次进入时才会出现。</Note>
         </Section>
 
+        <Section id="vocab" title="词汇库">
+          <p>点击顶部导航「词汇库」（手机上是「词汇」），或 ⚙️ 里的「生词本 · N 个」，查看所有生词：</p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>
+              <strong className="text-stone-800">搜索</strong>单词、释义或原句；按状态<strong className="text-stone-800">筛选</strong>
+              （新词、学习中、复习、已到期、缺释义、疑似残缺）；按最近添加、字母顺序或下次复习时间<strong className="text-stone-800">排序</strong>
+            </li>
+            <li>点一个词展开详情：完整释义、词根、原句、出处、复习次数和遗忘次数</li>
+            <li>
+              <strong className="text-stone-800">删除</strong>：复习进度会一起删除；连接了 Google Drive 时，其他设备上也会同步删除
+            </li>
+            <li>
+              <strong className="text-stone-800">重新查询释义</strong>：用当前的查词模式重新查一次，只更新释义、音标、词性和词根，不影响复习进度
+            </li>
+            <li>
+              <strong className="text-stone-800">疑似残缺</strong>：原句里找不到这个完整的单词（例如早期只选中了半个词就标记了 perspecti），建议删除后重新标记
+            </li>
+          </ul>
+          <p>
+            <strong className="text-stone-800">批量补全释义</strong>：有词没有释义，或者还是早期的演示数据「Mock Translation」时，页面顶部会出现提示，点「补全释义」用当前查词模式逐个重新查询，可以随时停止。AI 模式下每个词会调用一次 API，按用量计费。
+          </p>
+        </Section>
+
         <Section id="backup" title="同步与备份">
           <p>
             所有数据默认保存在<strong className="text-stone-800">当前浏览器</strong>
@@ -261,6 +288,9 @@ export default function HelpPage() {
             <li>API Key 和查词模式不同步，每台设备单独设置</li>
             <li>授权约 1 小时过期，过期后 ⚙️ 上会出现小圆点，点「重新连接」即可</li>
             <li>「断开」只是停止同步，本机和 Drive 上的数据都会保留</li>
+            <li>
+              「查看云端数据」：显示云端和本机各有多少生词、文章，以及云端最后更新的时间，可以确认两边是否一致；也可以下载云端的原始文件。同步文件存在 Drive 的隐藏文件夹里，在 Google Drive 网页上看不到
+            </li>
           </ul>
           <p>
             <strong className="text-stone-800">手动备份</strong>：⚙️ 里也可以「导出备份」（JSON 文件，包含生词和文章库）或「从备份导入」（同样按最后修改时间逐条合并）。没有连接 Google Drive 时，如果有未备份的生词，且距上次备份满{' '}
@@ -292,6 +322,14 @@ export default function HelpPage() {
             head={['位置', '按键', '作用']}
             rows={[
               ['阅读', <Kbd key="a">Esc</Kbd>, '关闭翻译气泡'],
+              [
+                '阅读',
+                <span key="p" className="space-x-1">
+                  <Kbd>←</Kbd>
+                  <Kbd>→</Kbd>
+                </span>,
+                '上一页 / 下一页（到章节边界时跨到上一章 / 下一章）',
+              ],
               ['每日复习', <Kbd key="b">空格</Kbd>, '显示答案（回车也可以）'],
               [
                 '每日复习',

@@ -105,3 +105,25 @@ export async function toggleWord(entry) {
   markDirty()
   return marked
 }
+
+/** 删除一个生词（软删除：留下删除记录，同步到其他设备） */
+export async function deleteWord(id) {
+  const t = nowIso()
+  await db.words.update(id, { deletedAt: t, updatedAt: t })
+  markDirty()
+}
+
+/** 更新生词的释义相关字段（重新查询释义时用），不影响复习进度 */
+export async function updateWordInfo(id, { translation, phonetic, pos, etymology }) {
+  await db.words.update(id, {
+    translation: translation ?? null,
+    phonetic: phonetic ?? null,
+    pos: pos ?? null,
+    etymology: etymology ?? null,
+    updatedAt: nowIso(),
+  })
+  markDirty()
+}
+
+/** 释义需要补全：没有释义，或者还是早期的演示数据（Mock Translation） */
+export const needsDefinition = (w) => !w.translation?.trim() || /mock translation/i.test(w.translation)

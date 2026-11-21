@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CardState, getDueWords, saveReview } from '../db'
 import { useNow } from '../hooks/useNow'
 import { formatInterval, grade, GRADES, LEARN_AHEAD_MS, previewNext } from '../srs'
+import { splitContext } from '../utils/text'
 
 const STATE_LABEL = {
   [CardState.New]: '新词',
@@ -15,18 +16,6 @@ const TONE = {
   rose: 'text-rose-700 hover:border-rose-300 hover:bg-rose-50',
   amber: 'text-amber-700 hover:border-amber-300 hover:bg-amber-50',
   emerald: 'text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50',
-}
-
-/**
- * 在原句里找到这个词（整词、忽略大小写），切成 [前文, 原词, 后文]，用于在原句里高亮它。
- * 找不到，或者标记的就是整句（几乎占满原句）时返回 null：此时正面只显示这句话本身。
- */
-function splitContext(context, word) {
-  if (!context || word.length > context.length * 0.6) return null
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const m = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').exec(context)
-  if (!m) return null
-  return [context.slice(0, m.index), m[0], context.slice(m.index + m[0].length)]
 }
 
 function Kbd({ children }) {

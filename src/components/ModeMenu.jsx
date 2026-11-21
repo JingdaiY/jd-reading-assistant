@@ -161,7 +161,7 @@ export default function ModeMenu() {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm whitespace-nowrap outline-none sm:px-2.5 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-stone-300 ${
+        className={`relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm whitespace-nowrap outline-none max-[400px]:px-1.5 sm:px-2.5 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-stone-300 ${
           open ? 'bg-stone-100 text-stone-900' : 'text-stone-500'
         }`}
       >

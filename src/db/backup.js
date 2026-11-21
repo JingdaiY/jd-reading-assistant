@@ -1,6 +1,7 @@
 import { createWordRecord, db, isActive } from '.'
 import { markDirty } from '../sync/events'
 import { articleKey, mergeRecords, wordKey } from '../sync/merge'
+import { downloadJson, todayStamp } from '../utils/download'
 import { getLastBackupAt, setLastBackupAt } from './backupReminder'
 
 const APP_ID = 'jd-reading-assistant'
@@ -20,13 +21,7 @@ export async function exportWords() {
     articles,
   }
 
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `jd-reading-words-${new Date().toLocaleDateString('sv')}.json` // 'sv' 区域格式 = 本地日期 YYYY-MM-DD
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000) // 等下载开始后再释放
+  downloadJson(backup, `jd-reading-words-${todayStamp()}.json`)
   setLastBackupAt(backup.exportedAt)
   return words.length
 }

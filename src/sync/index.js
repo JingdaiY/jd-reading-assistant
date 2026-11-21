@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import { db } from '../db'
+import { db, isActive } from '../db'
+import { downloadJson, todayStamp } from '../utils/download'
 import { onDirty } from './events'
 import { AuthError, downloadSyncFile, findSyncFile, getToken, requestToken, revokeToken, uploadSyncFile } from './google'
 import { articleKey, mergeRecords, wordKey } from './merge'
@@ -132,4 +133,44 @@ export function startAutoSync() {
     if (document.visibilityState === 'visible' && Date.now() - last > FOCUS_MIN_INTERVAL_MS) syncNow()
   })
   syncNow()
+}
+
+// ---------------- 查看云端数据 ----------------
+
+/**
+ * 读取 Drive 上的同步文件，和本机数据对比。
+ * 返回 { cloud: { words, deletedWords, articles, updatedAt, bytes } | null, local: { words, articles }, raw }
+ */
+export async function getCloudSummary() {
+  if (!getToken()) {
+    setState({ status: 'expired' })
+    throw new AuthError('授权已过期，请先重新连接')
+  }
+  try {
+    const fileId = await findSyncFile()
+    const raw = fileId ? await downloadSyncFile(fileId) : null
+    const words = raw?.words ?? []
+    const articles = raw?.articles ?? []
+    const localWords = await db.words.filter(isActive).count()
+    const localArticles = await db.articles.filter(isActive).count()
+    return {
+      cloud: raw && {
+        words: words.filter(isActive).length,
+        deletedWords: words.filter((w) => !isActive(w)).length,
+        articles: articles.filter(isActive).length,
+        updatedAt: raw.updatedAt ?? null,
+        bytes: new Blob([JSON.stringify(raw)]).size,
+      },
+      local: { words: localWords, articles: localArticles },
+      raw,
+    }
+  } catch (err) {
+    if (err instanceof AuthError) setState({ status: 'expired' })
+    throw err
+  }
+}
+
+/** 把云端的原始同步文件下载到本机 */
+export function downloadCloudFile(raw) {
+  downloadJson(raw, `jd-reading-cloud-${todayStamp()}.json`)
 }

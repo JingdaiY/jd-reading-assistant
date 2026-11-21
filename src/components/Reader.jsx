@@ -1,18 +1,19 @@
-function ChapterNav({ article, chapter, onChapterChange }) {
-  const total = article.chapters.length
-  if (total <= 1) return null
+/**
+ * 底部翻页：一章内有多页时翻页；翻到一章的第一页 / 最后一页时，按钮变成上一章 / 下一章。
+ * nav = { prev, next, prevLabel, nextLabel, label }，由 ReaderPage 计算
+ */
+function PageNav({ nav, onPrev, onNext }) {
+  if (!nav.prev && !nav.next) return null
   const btn =
     'rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100 disabled:opacity-30 disabled:hover:bg-transparent'
   return (
     <nav className="mt-16 flex items-center justify-between gap-3 border-t border-stone-200/70 pt-6">
-      <button type="button" className={btn} disabled={chapter === 0} onClick={() => onChapterChange(chapter - 1)}>
-        ‹ 上一章
+      <button type="button" className={btn} disabled={!nav.prev} onClick={onPrev}>
+        ‹ {nav.prevLabel}
       </button>
-      <span className="text-xs text-stone-400">
-        {chapter + 1} / {total}
-      </span>
-      <button type="button" className={btn} disabled={chapter === total - 1} onClick={() => onChapterChange(chapter + 1)}>
-        下一章 ›
+      <span className="text-center text-xs text-stone-400">{nav.label}</span>
+      <button type="button" className={btn} disabled={!nav.next} onClick={onNext}>
+        {nav.nextLabel} ›
       </button>
     </nav>
   )
@@ -34,7 +35,7 @@ function ImportHint() {
   )
 }
 
-export default function Reader({ article, chapter, onChapterChange, showImportHint, ref }) {
+export default function Reader({ article, chapter, page, paragraphs, pageCount, nav, onChapterChange, onPrev, onNext, showImportHint, ref }) {
   const current = article.chapters[chapter] ?? article.chapters[0]
   const total = article.chapters.length
   const isBook = total > 1
@@ -68,22 +69,28 @@ export default function Reader({ article, chapter, onChapterChange, showImportHi
       </div>
 
       {meta && <p className="text-xs font-medium tracking-widest text-stone-400 uppercase">{meta}</p>}
+      {pageCount > 1 && page > 0 && (
+        // 翻到第 2 页以后，标题上方提示当前页码
+        <p className="mt-1 text-xs text-stone-400">
+          第 {page + 1} / {pageCount} 页
+        </p>
+      )}
       <h1 className="mt-3 font-serif text-3xl leading-tight font-semibold tracking-tight text-stone-900 sm:text-4xl">
         {heading}
       </h1>
 
-      {/* key：切换文章 / 章节时整个 <article> 重新挂载，避免和 mark.js 改过的 DOM 冲突 */}
+      {/* key：切换文章 / 章节 / 页时整个 <article> 重新挂载，避免和 mark.js 改过的 DOM 冲突 */}
       <article
-        key={`${article.id}:${chapter}`}
+        key={`${article.id}:${chapter}:${page}`}
         ref={ref}
         className="mt-10 space-y-6 font-serif text-[1.1875rem] leading-[1.8] text-stone-800"
       >
-        {current.paragraphs.map((p, i) => (
+        {paragraphs.map((p, i) => (
           <p key={i}>{p}</p>
         ))}
       </article>
 
-      <ChapterNav article={article} chapter={chapter} onChapterChange={onChapterChange} />
+      <PageNav nav={nav} onPrev={onPrev} onNext={onNext} />
       {showImportHint && <ImportHint />}
     </main>
   )
