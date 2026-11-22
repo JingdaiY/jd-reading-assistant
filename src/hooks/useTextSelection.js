@@ -9,7 +9,8 @@ const isCore = (ch) => !!ch && CORE_CHAR.test(ch)
 
 /** 节点所在的段落（找不到时返回 null） */
 function blockOf(node) {
-  return (node.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest('p') ?? null
+  // 正文的块：普通段落 <p>，以及显示成小标题的 <h3>
+  return (node.nodeType === Node.TEXT_NODE ? node.parentElement : node)?.closest('p, h3') ?? null
 }
 
 /**

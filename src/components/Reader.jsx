@@ -19,6 +19,72 @@ function PageNav({ nav, onPrev, onNext }) {
   )
 }
 
+import { READER_WIDTHS, updateSettings, useSettings } from '../settings'
+import { classifyParagraph } from '../utils/paragraphStyle'
+
+/**
+ * 一段正文：按分类显示不同样式（小标题、列表、表格行、问答）。
+ * 各部分拼起来就是原文，划词 / 原句 / 高亮都不受影响
+ */
+function Paragraph({ text }) {
+  const { kind, marker, label, body } = classifyParagraph(text)
+  const strong = 'font-semibold text-stone-900'
+  if (kind === 'heading') {
+    return <h3 className="pt-4 font-sans text-[1.0625rem] leading-snug font-semibold tracking-tight text-stone-900">{body}</h3>
+  }
+  if (kind === 'question') {
+    return (
+      <p className={`border-l-2 border-stone-300 pl-4 ${strong}`}>
+        <span className="text-stone-400">{marker}</span>
+        {body}
+      </p>
+    )
+  }
+  if (kind === 'numbered' || kind === 'bullet') {
+    return (
+      // 列表项：缩进，编号 / 圆点挂在左边；开头的“小标题:”加粗
+      // 编号：原文里的“1. ”本身挂在左边；圆点：用 CSS 画“•”（伪元素不算文字），原文的“- ”隐藏
+      <p className={`relative pl-7 ${kind === 'bullet' ? "before:absolute before:left-1 before:text-stone-400 before:content-['•']" : ''}`}>
+        <span className={kind === 'bullet' ? 'hidden' : 'absolute left-0 font-sans text-[0.9em] text-stone-400'}>{marker}</span>
+        {label && <strong className={strong}>{label}</strong>}
+        {body}
+      </p>
+    )
+  }
+  if (kind === 'labeled' || kind === 'answer') {
+    return (
+      <p>
+        <strong className={strong}>{label}</strong>
+        {body}
+      </p>
+    )
+  }
+  return <p>{text}</p>
+}
+
+/** 阅读区宽度切换（窄 / 标准 / 宽），只在电脑 / 平板上显示 */
+function WidthSwitch() {
+  const { readerWidth } = useSettings()
+  return (
+    <div className="hidden items-center rounded-full border border-stone-200 bg-white p-0.5 shadow-sm sm:flex" role="group" aria-label="阅读宽度">
+      {Object.entries(READER_WIDTHS).map(([id, w]) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={readerWidth === id}
+          title={`阅读宽度：${w.label}`}
+          onClick={() => updateSettings({ readerWidth: id })}
+          className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
+            readerWidth === id ? 'bg-ink text-white' : 'text-stone-500 hover:text-stone-800'
+          }`}
+        >
+          {w.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** EPUB 插图：图片还没取出来时显示占位框；原始文件拿不到时显示图片说明 */
 function Figure({ item, url, error }) {
   if (url) {
@@ -69,6 +135,8 @@ export default function Reader({
   openingOriginal,
   ref,
 }) {
+  const { readerWidth } = useSettings()
+  const widthClass = (READER_WIDTHS[readerWidth] ?? READER_WIDTHS.standard).className
   const current = article.chapters[chapter] ?? article.chapters[0]
   const total = article.chapters.length
   const isBook = total > 1
@@ -77,8 +145,8 @@ export default function Reader({
   const meta = article.meta ?? [article.author, isBook && article.title].filter(Boolean).join(' · ')
 
   return (
-    <main className="mx-auto max-w-2xl px-5 pt-6 pb-40 sm:px-6 sm:pt-10 sm:pb-32">
-      <div className="mb-8 flex items-center justify-between gap-3 sm:mb-12">
+    <main className={`mx-auto px-5 pt-6 pb-40 sm:px-6 sm:pt-10 sm:pb-32 ${widthClass}`}>
+      <div className="mb-8 flex flex-wrap items-center gap-2 sm:mb-12 sm:gap-3">
         <a
           href="#/library"
           className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 shadow-sm transition-colors hover:bg-stone-100 hover:text-stone-900"
@@ -91,17 +159,20 @@ export default function Reader({
             type="button"
             onClick={onOpenOriginal}
             disabled={openingOriginal}
-            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 shadow-sm transition-colors hover:bg-stone-100 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 shadow-sm transition-colors hover:bg-stone-100 disabled:opacity-50"
           >
             <span aria-hidden>📄</span> {openingOriginal ? '正在打开…' : '原版页面'}
           </button>
         )}
+        {/* 右侧：宽度切换 + 章节选择；min-w-0 让章节下拉框在空间不够时缩短，而不是把整行挤到下一行 */}
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          <WidthSwitch />
         {isBook && (
           <select
             aria-label="选择章节"
             value={chapter}
             onChange={(e) => onChapterChange(Number(e.target.value))}
-            className="max-w-[60%] truncate rounded-md border border-stone-200 bg-white px-2 py-1 text-base text-stone-600 sm:text-sm"
+            className="w-full max-w-[14rem] min-w-0 truncate rounded-md border border-stone-200 bg-white px-2 py-1 text-base text-stone-600 sm:w-auto sm:max-w-[18rem] sm:text-sm"
           >
             {article.chapters.map((c, i) => (
               <option key={i} value={i}>
@@ -110,6 +181,7 @@ export default function Reader({
             ))}
           </select>
         )}
+        </div>
       </div>
 
       {meta && <p className="text-xs font-medium tracking-widest text-stone-400 uppercase">{meta}</p>}
@@ -131,7 +203,7 @@ export default function Reader({
       >
         {paragraphs.map((p, i) =>
           typeof p === 'string' ? (
-            <p key={i}>{p}</p>
+            <Paragraph key={i} text={p} />
           ) : (
             <Figure key={i} item={p} url={images?.urls.get(p.src)} error={images?.error} />
           ),

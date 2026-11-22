@@ -34,6 +34,14 @@ const DEFAULTS = {
   // 每家服务商各存一份 Key 和模型，切换服务商时不会丢
   keys: { doubao: '', openai: '', gemini: '' },
   models: Object.fromEntries(Object.entries(PROVIDERS).map(([id, p]) => [id, p.defaultModel])),
+  readerWidth: 'standard', // 阅读区宽度：'narrow' | 'standard' | 'wide'（只影响电脑 / 平板，手机上总是占满屏幕）
+}
+
+/** 阅读区宽度选项：Tailwind 只识别完整的类名，所以写成静态映射 */
+export const READER_WIDTHS = {
+  narrow: { label: '窄', className: 'sm:max-w-2xl' }, // 672px，一行约 70 个字符
+  standard: { label: '标准', className: 'sm:max-w-3xl' }, // 768px，一行约 80 个字符
+  wide: { label: '宽', className: 'sm:max-w-4xl' }, // 896px
 }
 
 function load() {
