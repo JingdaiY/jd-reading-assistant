@@ -50,7 +50,9 @@ export default function PdfViewer({ blob, startPage = 0, onClose }) {
         setStatus({ type: 'loading' })
         pdfPage = await doc.getPage(page + 1)
         if (cancelled) return
-        const width = Math.min(boxRef.current.clientWidth, 900)
+        // 页面宽度：浮层可用宽度（去掉左右留白），最宽 900px，和工具栏对齐
+        const style = getComputedStyle(boxRef.current)
+        const width = Math.min(boxRef.current.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), 900)
         const base = pdfPage.getViewport({ scale: 1 })
         const scale = width / base.width
         const dpr = window.devicePixelRatio || 1
@@ -92,7 +94,9 @@ export default function PdfViewer({ blob, startPage = 0, onClose }) {
     'rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 transition-colors hover:bg-stone-100 disabled:opacity-30'
   return (
     <div role="dialog" aria-label="原版页面" className="fixed inset-0 z-[60] flex flex-col bg-stone-100/95 backdrop-blur">
-      <div className="flex items-center justify-between gap-2 border-b border-stone-200 bg-paper px-4 py-2.5">
+      {/* 工具栏：内容和下面的 PDF 页面一样居中、同宽（最宽 900px），关闭按钮紧挨页面右边缘，宽屏上也不会跑到屏幕最右边 */}
+      <div className="border-b border-stone-200 bg-paper px-3 py-2.5 sm:px-6">
+        <div className="mx-auto flex w-full max-w-[900px] items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <button type="button" className={btn} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
             ‹
@@ -102,9 +106,14 @@ export default function PdfViewer({ blob, startPage = 0, onClose }) {
             ›
           </button>
         </div>
-        <button type="button" className={btn} onClick={onClose}>
-          关闭
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-stone-700 active:scale-95"
+        >
+          <span aria-hidden>✕</span> 关闭
         </button>
+        </div>
       </div>
       <div ref={boxRef} className="flex-1 overflow-auto p-3 sm:p-6">
         {status.type === 'error' && <p className="mx-auto max-w-md rounded-lg bg-rose-50 p-4 text-sm text-rose-600">{status.text}</p>}
