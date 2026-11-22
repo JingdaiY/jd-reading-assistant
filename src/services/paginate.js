@@ -4,9 +4,10 @@
 
 export const WORDS_PER_PAGE = 1800
 
-const countWords = (p) => p.split(/\s+/).filter(Boolean).length
+const IMAGE_WORDS = 80 // 一张插图大约占多少个词的版面
+const countWords = (p) => (typeof p === 'string' ? p.split(/\s+/).filter(Boolean).length : IMAGE_WORDS)
 
-/** 段落数组 → 页数组（每页是一组段落） */
+/** 段落数组 → 页数组（每页是一组段落；段落可以是文字，也可以是插图对象） */
 export function paginate(paragraphs, wordsPerPage = WORDS_PER_PAGE) {
   const pages = []
   let current = []

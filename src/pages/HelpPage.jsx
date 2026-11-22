@@ -98,7 +98,10 @@ export default function HelpPage() {
               <strong className="text-stone-800">上传 TXT</strong>：自动把硬换行接回成段落，识别章节标题；Project Gutenberg 的 TXT 会自动去掉前后的版权声明
             </li>
             <li>
-              <strong className="text-stone-800">上传 EPUB</strong>：按章节阅读，读取书名和作者
+              <strong className="text-stone-800">上传 EPUB</strong>：支持 EPUB 2 和 EPUB 3，按章节阅读，读取书名和作者，书里的插图会显示在原来的位置（Kindle 的 AZW / MOBI 格式不支持）
+            </li>
+            <li>
+              <strong className="text-stone-800">上传 PDF</strong>（最大 200 MB）：自动把 PDF 的文字整理成段落和章节（有书签目录时按书签分章），去掉页眉页脚和页码。阅读时点右上角「📄 原版页面」，可以看到当前这页对应的原始 PDF 页面（图片、图表、原始排版都在）。扫描版 PDF（内容是图片）暂不支持；双栏论文等复杂排版的整理效果可能不理想
             </li>
           </ul>
           <p>
@@ -106,7 +109,7 @@ export default function HelpPage() {
             <Kbd>←</Kbd> <Kbd>→</Kbd> 翻页。每本书会记住读到的章节、页码和位置。
           </p>
           <Note>
-            文件只在浏览器里解析，不会上传。Kindle 等受 DRM 保护的电子书无法导入；只支持没有 DRM 的 EPUB（例如 Project Gutenberg 的公版书），也可以复制段落后粘贴。暂不支持导入网页链接，可以复制网页正文后粘贴。
+            文件在浏览器里解析，不经过任何服务器；PDF 和 EPUB 的原始文件会保存在本机（连接了 Google Drive 时也会存一份到你自己的 Drive）。Kindle 等受 DRM 保护的电子书无法导入；只支持没有 DRM 的 EPUB（例如 Project Gutenberg 的公版书），也可以复制段落后粘贴。暂不支持导入网页链接，可以复制网页正文后粘贴。
           </Note>
         </Section>
 
@@ -285,6 +288,10 @@ export default function HelpPage() {
           </p>
           <ul className="list-disc space-y-1.5 pl-5">
             <li>按单词逐条合并：同一个词在两台设备上都改过时，最后修改的那份生效</li>
+            <li>
+              书按需下载：新设备上书架会列出所有书，标着「☁️ 云端」，打开哪本才下载哪本；本机只保留最近打开的 3 本书，更早的会自动清掉（云端还有，再打开时重新下载）。还没上传到云端的书不会被清掉
+            </li>
+            <li>在书架上删除一本书，云端的那份也会一起删除</li>
             <li>API Key 和查词模式不同步，每台设备单独设置</li>
             <li>授权约 1 小时过期，过期后 ⚙️ 上会出现小圆点，点「重新连接」即可</li>
             <li>「断开」只是停止同步，本机和 Drive 上的数据都会保留</li>
@@ -293,7 +300,7 @@ export default function HelpPage() {
             </li>
           </ul>
           <p>
-            <strong className="text-stone-800">手动备份</strong>：⚙️ 里也可以「导出备份」（JSON 文件，包含生词和文章库）或「从备份导入」（同样按最后修改时间逐条合并）。没有连接 Google Drive 时，如果有未备份的生词，且距上次备份满{' '}
+            <strong className="text-stone-800">手动备份</strong>：⚙️ 里也可以「导出备份」（JSON 文件，包含生词、书架和本机上的书的正文；PDF / EPUB 原始文件太大，不放进备份）或「从备份导入」（同样按最后修改时间逐条合并）。没有连接 Google Drive 时，如果有未备份的生词，且距上次备份满{' '}
             {REMIND_AFTER_DAYS} 天、或未备份的词达到 {REMIND_AFTER_WORDS} 个，⚙️ 上会出现橙色小圆点提醒你备份。
           </p>
         </Section>

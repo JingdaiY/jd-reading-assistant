@@ -1,14 +1,17 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import PdfViewer from '../components/PdfViewer'
 import Reader from '../components/Reader'
 import SelectionTooltip from '../components/SelectionTooltip'
 import { toggleWord } from '../db'
-import { getArticle, getArticles, getCurrentArticleId, SAMPLE, saveProgress, setCurrentArticleId } from '../db/articles'
+import { getArticle, getArticles, getCurrentArticleId, SAMPLE, SAMPLE_CONTENT, saveProgress, setCurrentArticleId } from '../db/articles'
+import { useEpubImages } from '../hooks/useEpubImages'
 import { useHighlights } from '../hooks/useHighlights'
 import { useTextSelection } from '../hooks/useTextSelection'
 import { preloadDictionary } from '../services/dictionary'
 import { paginate } from '../services/paginate'
 import { useSettings } from '../settings'
+import { ensureContent, ensureOriginal } from '../sync'
 
 const SAVE_DELAY_MS = 800 // 停止滚动 0.8 秒后保存阅读位置
 
@@ -26,7 +29,25 @@ export default function ReaderPage({ words }) {
   const [articleId] = useState(getCurrentArticleId)
   // undefined = 加载中；null = 找不到（比如在另一台设备上删掉了）→ 回到内置示例文章
   const stored = useLiveQuery(() => getArticle(articleId), [articleId])
-  const article = stored === undefined ? undefined : (stored ?? SAMPLE)
+  const meta = stored === undefined ? undefined : (stored ?? SAMPLE)
+
+  // 书的正文：打开时才读进内存（本机缓存，或从 Google Drive 下载）。只保存在这个页面的 state 里，
+  // 离开阅读页 / 换一本书时整个页面卸载，正文随之释放，不会和其他书一起堆在内存里
+  const [content, setContent] = useState({ status: 'loading', chapters: null, error: null })
+  const [retry, setRetry] = useState(0)
+  const metaId = meta?.id
+  useEffect(() => {
+    if (!metaId) return
+    let alive = true
+    const load = metaId === SAMPLE.id ? Promise.resolve(SAMPLE_CONTENT.chapters) : ensureContent(metaId)
+    load
+      .then((chapters) => alive && setContent({ status: 'done', chapters, error: null }))
+      .catch((err) => alive && setContent({ status: 'error', chapters: null, error: err.message }))
+    return () => {
+      alive = false
+    }
+  }, [metaId, retry])
+  const article = useMemo(() => (meta && content.chapters ? { ...meta, chapters: content.chapters } : undefined), [meta, content.chapters])
   // 书架上还没有自己导入的材料时，在示例文章末尾提示去导入
   const libraryCount = useLiveQuery(async () => (await getArticles()).length, [], null)
 
@@ -35,12 +56,27 @@ export default function ReaderPage({ words }) {
   const progress = article?.progress ?? {}
   const chapterCount = article?.chapters.length ?? 1
   const chapter = clamp(posOverride?.chapter ?? progress.chapter ?? 0, 0, chapterCount - 1)
-  const pages = useMemo(() => (article ? paginate(article.chapters[chapter].paragraphs) : [[]]), [article, chapter])
+  const pages = useMemo(() => (content.chapters ? paginate(content.chapters[chapter].paragraphs) : [[]]), [content.chapters, chapter])
   // 旧版进度只记了“整章滚到哪里”（ratio），换算成对应的页
   const savedPage = progress.page ?? Math.floor((progress.ratio ?? 0) * pages.length)
   const page = clamp(posOverride?.page ?? savedPage, 0, pages.length - 1)
 
   const { selection } = useTextSelection(articleRef, tooltipRef)
+  const images = useEpubImages(article, pages[page] ?? [])
+
+  // 查看原版 PDF 页面：{ loading } → { blob, startPage }；关闭时设回 null，PdfViewer 卸载时销毁 PDF 文档
+  const [viewer, setViewer] = useState(null)
+  const firstParagraph = pages.slice(0, page).reduce((n, p) => n + p.length, 0) // 当前页第一段在本章里的下标
+  const openOriginal = async () => {
+    const startPage = article.chapters[chapter].pages?.[firstParagraph] ?? 0
+    setViewer({ loading: true })
+    try {
+      setViewer({ blob: await ensureOriginal(article.id), startPage })
+    } catch (err) {
+      setViewer(null)
+      window.alert(err.message)
+    }
+  }
   useHighlights(articleRef, words, article ? `${article.id}:${chapter}:${page}` : null)
 
   const { mode } = useSettings()
@@ -87,7 +123,7 @@ export default function ReaderPage({ words }) {
 
   // 翻到指定章、页（page = Infinity 表示那一章的最后一页）
   const goTo = (nextChapter, nextPage) => {
-    const resolved = Number.isFinite(nextPage) ? nextPage : paginate(article.chapters[nextChapter].paragraphs).length - 1
+    const resolved = Number.isFinite(nextPage) ? nextPage : paginate(content.chapters[nextChapter].paragraphs).length - 1
     setPosOverride({ chapter: nextChapter, page: resolved })
     saveProgress(article.id, { chapter: nextChapter, page: resolved, ratio: 0 })
     window.scrollTo(0, 0)
@@ -122,7 +158,34 @@ export default function ReaderPage({ words }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  if (!article) return null
+  if (!meta) return null
+  if (!article) {
+    // 正文还在加载（本机读取通常一瞬间；从 Google Drive 下载可能要几秒）或加载失败
+    return (
+      <main className="mx-auto max-w-2xl px-5 pt-16 text-center sm:px-6">
+        <p className="font-serif text-2xl font-semibold text-stone-900">{meta.title}</p>
+        {content.status === 'error' ? (
+          <>
+            <p className="mx-auto mt-6 max-w-md rounded-lg bg-rose-50 p-4 text-sm leading-relaxed text-rose-600">{content.error}</p>
+            <div className="mt-6 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRetry((n) => n + 1)}
+                className="rounded-lg bg-ink px-4 py-2 text-sm text-white hover:bg-stone-700"
+              >
+                重试
+              </button>
+              <a href="#/library" className="rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 hover:bg-stone-100">
+                回到书架
+              </a>
+            </div>
+          </>
+        ) : (
+          <p className="mt-6 text-sm text-stone-400">正在加载正文…（本机没有缓存时会从 Google Drive 下载）</p>
+        )}
+      </main>
+    )
+  }
 
   const isMarked = (text) => words.some((w) => w.word.toLowerCase() === text.toLowerCase())
 
@@ -142,8 +205,13 @@ export default function ReaderPage({ words }) {
         onChapterChange={(n) => goTo(n, 0)}
         onPrev={goPrev}
         onNext={goNext}
+        images={images}
+        onOpenOriginal={article.kind === 'pdf' && article.hasOriginal ? openOriginal : null}
+        openingOriginal={!!viewer?.loading}
         showImportHint={article.id === SAMPLE.id && libraryCount === 0}
       />
+
+      {viewer?.blob && <PdfViewer blob={viewer.blob} startPage={viewer.startPage} onClose={() => setViewer(null)} />}
 
       {/* key 让每次新划词都重新挂载气泡，重新播放出现动画 */}
       {selection && (

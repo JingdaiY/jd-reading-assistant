@@ -6,7 +6,6 @@
 // OAuth Client ID 本来就是公开信息（会出现在每个用户的浏览器里），可以直接写在代码里
 export const GOOGLE_CLIENT_ID = '1076658688471-c6143ck3ku2pkp9o5iqh0b12lse8vhl6.apps.googleusercontent.com'
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
-const FILE_NAME = 'jd-reading-sync.json'
 const TOKEN_KEY = 'jdra.googleToken' // { accessToken, expiresAt }，access token 约 1 小时过期
 
 export class AuthError extends Error {}
@@ -101,47 +100,86 @@ async function driveFetch(url, options = {}) {
   return res
 }
 
-/** 找到同步文件，返回它的 id（还没有时返回 null） */
-export async function findSyncFile() {
-  const q = encodeURIComponent(`name='${FILE_NAME}'`)
-  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,modifiedTime)`)
-  const { files } = await res.json()
-  return files?.[0]?.id ?? null
+// 同步文件布局（都在 appDataFolder 里）：
+//   jd-reading-sync.json      生词 + 书架目录（文章元数据），每次同步都读写，体积很小
+//   article-<id>.json         某本书的正文（导入后不再变化），打开这本书时才下载
+//   original-<id>             某本书的原始文件（PDF / EPUB），查看原版页面 / 显示插图时才下载
+export const INDEX_FILE = 'jd-reading-sync.json'
+export const contentFileName = (id) => `article-${id}.json`
+export const originalFileName = (id) => `original-${id}`
+
+const API = 'https://www.googleapis.com/drive/v3/files'
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
+const RESUMABLE_THRESHOLD = 4 * 1024 * 1024 // 超过 4 MB 用分段上传（Drive 的普通上传只适合 5 MB 以内的文件）
+
+/** 列出 appDataFolder 里所有文件 → Map(文件名 → { id, size }) */
+export async function listAppFiles() {
+  const files = new Map()
+  let pageToken = ''
+  do {
+    const res = await driveFetch(
+      `${API}?spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(id,name,size)${pageToken ? `&pageToken=${pageToken}` : ''}`,
+    )
+    const body = await res.json()
+    for (const f of body.files ?? []) files.set(f.name, { id: f.id, size: Number(f.size) || 0 })
+    pageToken = body.nextPageToken ?? ''
+  } while (pageToken)
+  return files
 }
 
-export async function downloadSyncFile(id) {
-  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`)
-  return res.json()
+/** 下载文件：as = 'json' | 'blob' */
+export async function downloadFile(id, as = 'json') {
+  const res = await driveFetch(`${API}/${id}?alt=media`)
+  return as === 'blob' ? res.blob() : res.json()
 }
 
-/** 上传同步文件：id 为空时新建，否则覆盖 */
-export async function uploadSyncFile(id, data) {
-  const json = JSON.stringify(data)
-  if (id) {
-    await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: json,
-    })
-    return id
+export async function deleteFile(id) {
+  await driveFetch(`${API}/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * 上传文件：fileId 为空时新建（放进 appDataFolder），否则覆盖内容。
+ * data：字符串（JSON）或 Blob（原始文件）。返回文件 id。
+ */
+export async function uploadFile({ name, data, mimeType = 'application/json', fileId = null }) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mimeType })
+  if (blob.size > RESUMABLE_THRESHOLD) return uploadResumable({ name, blob, mimeType, fileId })
+
+  if (fileId) {
+    await driveFetch(`${UPLOAD}/${fileId}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': mimeType }, body: blob })
+    return fileId
   }
   // 新建：multipart 上传，同时带上文件名和“放在 appDataFolder”这两个元数据
   const boundary = `jdra${crypto.randomUUID()}`
-  const body = [
-    `--${boundary}`,
-    'Content-Type: application/json; charset=UTF-8',
-    '',
-    JSON.stringify({ name: FILE_NAME, parents: ['appDataFolder'] }),
-    `--${boundary}`,
-    'Content-Type: application/json',
-    '',
-    json,
-    `--${boundary}--`,
-  ].join('\r\n')
-  const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+  const body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+    JSON.stringify({ name, parents: ['appDataFolder'] }),
+    `\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+    blob,
+    `\r\n--${boundary}--`,
+  ])
+  const res = await driveFetch(`${UPLOAD}?uploadType=multipart&fields=id`, {
     method: 'POST',
     headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
     body,
   })
   return (await res.json()).id
+}
+
+/**
+ * 分段上传（resumable）：先建立上传会话拿到会话地址，再把文件内容 PUT 过去。
+ * 会话地址在响应头 Location 里；浏览器读不到 Location 时，用 X-GUploader-UploadID 拼出同一个地址。
+ */
+async function uploadResumable({ name, blob, mimeType, fileId }) {
+  const url = fileId ? `${UPLOAD}/${fileId}?uploadType=resumable` : `${UPLOAD}?uploadType=resumable&fields=id`
+  const res = await driveFetch(url, {
+    method: fileId ? 'PATCH' : 'POST',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': mimeType, 'X-Upload-Content-Length': String(blob.size) },
+    body: JSON.stringify(fileId ? {} : { name, parents: ['appDataFolder'] }),
+  })
+  const uploadId = res.headers.get('X-GUploader-UploadID')
+  const session = res.headers.get('Location') || (uploadId ? `${url}&upload_id=${encodeURIComponent(uploadId)}` : null)
+  if (!session) throw new Error('无法建立 Google Drive 上传会话')
+  const put = await driveFetch(session, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: blob })
+  return fileId ?? (await put.json()).id
 }

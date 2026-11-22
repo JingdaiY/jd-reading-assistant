@@ -83,8 +83,14 @@ function CloudPanel() {
             {local.words} 个生词 · {local.articles} 篇文章
           </p>
           <p className="mt-1 text-stone-400">
-            {cloud.updatedAt && `云端更新于 ${new Date(cloud.updatedAt).toLocaleString()} · `}文件大小 {formatBytes(cloud.bytes)}
+            {cloud.updatedAt && `云端更新于 ${new Date(cloud.updatedAt).toLocaleString()} · `}索引文件 {formatBytes(cloud.bytes)}
           </p>
+          {cloud.bookFiles > 0 && (
+            // 每本书的正文和原始文件单独存放，打开时才下载
+            <p className="text-stone-400">
+              书的正文 / 原始文件：{cloud.bookFiles} 个，共 {formatBytes(cloud.bookBytes)}
+            </p>
+          )}
           <p className={`mt-1 ${same ? 'text-emerald-600' : 'text-amber-600'}`}>
             {same ? '✓ 本机和云端一致' : '本机和云端数量不同：点「立即同步」后再查看'}
           </p>

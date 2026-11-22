@@ -42,11 +42,16 @@ npm run preview   # 本地预览打包结果
 
 - **粘贴文本**：段落之间空一行；`Chapter 1`、`Part Two` 这类标题开头的段落自动分章
 - **上传 TXT**：自动把硬换行接回成段落、识别章节标题；Project Gutenberg 的 TXT 会自动去掉前后的版权声明；没有章节又很长的文本自动按 60 段分成若干部分
-- **上传 EPUB**：按 spine 顺序提取各章正文，读取书名和作者；**受 DRM 保护的 EPUB 会提示无法导入**（Kindle 电子书都带 DRM）
+- **上传 EPUB**：支持 **EPUB 2 和 EPUB 3**（固定版式的图画书 / 漫画基本是图片，提取不到文字）。按 spine 阅读顺序提取各章正文（`<p>`、标题、列表，以及老式电子书用来排段落的最内层 `<div>`），跳过目录页和 `linear="no"` 的封面等辅助页，读取书名和作者；**受 DRM 保护的 EPUB 会提示无法导入**。Kindle 的 AZW / KFX / MOBI 不是 EPUB 格式，也不支持
+- **上传 PDF**（上限 200 MB）：用 pdf.js 提取文字，再根据每行的位置、字号和字体还原段落（`src/services/pdfLayout.js`）：段落间距、粗体 / 大字号小标题、项目符号和编号列表、行末连字符断词、跨页段落、每页重复的页眉页脚和页码、两栏表格（输出为「左栏：右栏」）、双栏正文（先左栏后右栏）。分章优先用 PDF 自带的书签目录，没有书签时识别 `Chapter N` 这类标题。元数据里无意义的书名（`about:blank`、`Untitled` 等）改用文件名。**扫描版 PDF**（内容是图片）会提示暂不支持；**有密码的 PDF** 无法导入
+- **保存原始文件**：PDF 和 EPUB 的原始文件也会保存（本机 + 同步到 Drive），用于：
+  - **EPUB 插图**：正文里记着图片在 EPUB 包里的路径，阅读时从原始 EPUB 里取出来，显示在原来的位置；只取当前页用到的图片，翻页 / 离开时释放（`src/hooks/useEpubImages.js`）
+  - **PDF「📄 原版页面」**：阅读页右上角的按钮，用 pdf.js 把当前这页正文对应的原 PDF 页面按原样画出来（图片、图表、原始排版），可前后翻页；关闭时销毁 pdf.js 文档、释放内存（`src/components/PdfViewer.jsx`）。每段文字都记了它在原 PDF 里的页码，所以能定位到对应的页
+- 默认用「重新排版的文字」阅读（适配手机屏幕、可以划词 / 高亮 / 复习），原版页面按需查看
 - 多章节时右上角可选章节；**长章节自动分页**（按段落边界切分，每页约 1800 词，`src/services/paginate.js` 的 `WORDS_PER_PAGE`），底部「上一页 / 第 x / n 页 / 下一页」，翻到章节边界时自动跨到上一章最后一页 / 下一章第一页；电脑上可用 ← → 键翻页
 - 每本书记住读到的章节、页码和页内滚动位置；旧版只记了整章滚动位置的进度会自动换算成页码
 - 分页只在显示时计算，不存数据库；高亮只处理当前页，长章节也不会卡
-- 文件只在浏览器里解析，不上传；EPUB 解析用 JSZip（按需加载）
+- 文件只在浏览器里解析，不经过任何服务器；EPUB 解析用 JSZip、PDF 用 pdf.js，都是导入时才按需加载
 - 暂不支持导入网页链接（浏览器不能跨域抓取其他网站，需要后端代理），可以复制正文后粘贴
 
 ### 词汇库
@@ -98,14 +103,27 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 
 ### Google Drive 同步
 
-导航栏右上角的**云朵图标**（或 ⚙️）→「连接 Google Drive」。云朵图标显示同步状态：灰色 = 未连接，绿色带勾 = 已同步，橙色带感叹号 = 授权过期或出错。每个用户用**自己的 Google 账号**授权，生词（含复习进度、删除记录）和文章库存到**他自己 Drive 的应用隐藏文件夹**（`appDataFolder`，文件名 `jd-reading-sync.json`；在 Drive 里看不到，只有本应用能读写）。网站不经手任何人的数据，请求从浏览器直接发给 Google。
+导航栏右上角的**云朵图标**（或 ⚙️）→「连接 Google Drive」。云朵图标显示同步状态：灰色 = 未连接，绿色带勾 = 已同步，橙色带感叹号 = 授权过期或出错。每个用户用**自己的 Google 账号**授权，数据存到**他自己 Drive 的应用隐藏文件夹**（`appDataFolder`；在 Drive 里看不到，只有本应用能读写）。网站不经手任何人的数据，请求从浏览器直接发给 Google。
+
+Drive 上的文件布局（`src/sync/google.js`）：
+
+| 文件 | 内容 | 什么时候读写 |
+|---|---|---|
+| `jd-reading-sync.json` | 索引：全部生词（含复习进度、删除记录）+ 书架目录（每本书的元数据、阅读进度） | 每次同步，体积很小 |
+| `article-<id>.json` | 某本书的正文（章节和段落） | 导入后上传一次；**打开这本书时才下载** |
+| `original-<id>` | 某本书的原始文件（PDF / EPUB） | 导入后上传一次；查看原版页面 / 显示插图时才下载 |
+
+- **按需下载 + 本机缓存**：新设备连接后只下载索引，书架上的书显示「☁️ 云端」；打开哪本才下载哪本的正文（`ensureContent`），原始文件同理（`ensureOriginal`）。本机只缓存**最近打开的 3 本书**（`CACHE_BOOKS`），更早的自动清掉，再打开时重新下载；**还没上传到 Drive 的书永远不会被清理**（它是唯一一份）
+- **上传**：书的正文和原始文件导入后只上传一次（之后内容不变）；超过 4 MB 的文件用 Drive 的分段上传（resumable），读不到 `Location` 响应头时用 `X-GUploader-UploadID` 拼出会话地址
+- **删除**：在书架上删掉一本书后，下次同步会删除 Drive 上它的正文和原始文件，释放用户的 Drive 空间
+- **兼容旧版**：旧版同步文件把正文放在索引里；新版第一次同步时会自动拆成单独的文件，并把索引改写为 v2
 
 - **授权**：Google Identity Services 的 token 模式（纯前端），权限只有 `drive.appdata`。access token 约 1 小时过期，存在 localStorage（`jdra.googleToken`）；过期后 ⚙️ 上出现小圆点，点「重新连接」
 - **何时同步**：打开应用时、本地数据变化后 3 秒（连续操作合并为一次）、切回页面时（距上次 30 秒以上）、手动「立即同步」
 - **合并规则**（`src/sync/merge.js`，备份导入也用这套）：逐条合并，生词按小写单词匹配、文章按 id 匹配；两边都有时 `updatedAt` 更新的那份胜出；删除是软删除（`deletedAt`），删除记录也会同步
 - **不同步**：API Key、查词模式等设置（每台设备单独设置）
 - 「断开」会撤销授权，本机和 Drive 上的数据都保留
-- 「**查看云端数据**」：读取 Drive 上的同步文件，显示云端 / 本机各自的生词数、文章数、云端更新时间和文件大小，提示两边是否一致；可以下载云端原始文件。同步文件在 Google Drive 网页上看不到（应用隐藏文件夹），只能在 Drive 设置 →「管理应用」里看到这个应用占用的隐藏数据大小
+- 「**查看云端数据**」：读取 Drive 上的索引，显示云端 / 本机各自的生词数、文章数、云端更新时间、索引大小，以及书的正文 / 原始文件的数量和总大小（只统计，不下载），提示两边是否一致；可以下载云端的索引文件。同步文件在 Google Drive 网页上看不到（应用隐藏文件夹），只能在 Drive 设置 →「管理应用」里看到这个应用占用的隐藏数据大小
 - Google Cloud 项目目前是**测试模式**：只有在 Google Cloud 后台「测试用户」名单里的账号能授权（最多 100 个）。要开放给所有人，需要发布应用并完成基础验证（隐私政策、首页、域名验证）
 - OAuth Client ID 写在 `src/sync/google.js`（Client ID 是公开信息）；已授权的 JavaScript 来源：线上域名和 `http://localhost:5173`
 
@@ -113,8 +131,8 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 
 点击右上角 ⚙️：
 
-- **导出备份**：下载 `jd-reading-words-YYYY-MM-DD.json`，包含全部生词（含复习进度）和文章库
-- **从备份导入**：按和 Drive 同步相同的规则逐条合并（较新的胜出），文件里缺失的字段自动补默认值；兼容旧版（v1，只有生词）的备份文件
+- **导出备份**：下载 `jd-reading-words-YYYY-MM-DD.json`，包含全部生词（含复习进度）、书架目录，以及**本机缓存着的书的正文**。原始 PDF / EPUB 文件太大，不放进备份（连接 Google Drive 时它们已经在云端）
+- **从备份导入**：按和 Drive 同步相同的规则逐条合并（较新的胜出），文件里缺失的字段自动补默认值；兼容旧版的备份文件（v1 只有生词，v2 的正文在文章记录里）
 
 **备份提醒**（只在没连接 Google Drive 时显示）：有未备份的生词，并且满足下面任一条件时，⚙️ 右上角会出现橙色小圆点，菜单里也会显示「有 N 个生词还没备份」：
 
@@ -172,6 +190,9 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 - [x] 长章节分页（每页约 1800 词）+ 键盘翻页（设计文档外新增）
 - [x] 同步设置里「查看云端数据」：云端 / 本机数量对比、下载云端原始文件（设计文档外新增）
 - [x] Google Drive 同步：每个用户存到自己 Drive 的应用隐藏文件夹，逐条合并（设计文档外新增，**尚未用真实 Google 账号测试**）
+- [x] PDF 导入：版面还原（段落、标题、列表、表格、双栏、页眉页脚）、书签分章、扫描版检测（设计文档外新增）
+- [x] 存储结构 v3：书的元数据和正文分开存，按需加载；Drive 上每本书单独的文件，打开时才下载，本机缓存最近 3 本（设计文档外新增）
+- [x] 保存原始 PDF / EPUB：EPUB 插图显示在正文里、PDF「原版页面」查看（设计文档外新增）
 - [ ] 导入网页链接（需要后端代理，暂不做）
 - [ ] 复习记录（review log）：暂未保存，以后要用 FSRS 优化器训练个人参数、或做复习统计时再加
 
@@ -184,7 +205,7 @@ AI Agent 设置：选服务商 → 填 API Key 和模型 → 「测试连接」�
 | 本地数据库 | Dexie.js（IndexedDB）+ dexie-react-hooks |
 | 高亮 | mark.js |
 | 间隔重复 | ts-fsrs v5（FSRS 算法，开启 fuzz） |
-| 电子书解析 | JSZip（EPUB 解压，按需加载）+ 浏览器自带 DOMParser |
+| 电子书解析 | JSZip（EPUB 解压）+ 浏览器自带 DOMParser；pdf.js（`pdfjs-dist`，Mozilla，Apache-2.0）提取 PDF 文字、渲染原版页面。都按需加载 |
 | 云同步 | Google Identity Services（token 模式）+ Google Drive API v3（appDataFolder） |
 | 路由 | 自写的 hash 路由（无依赖，静态托管无需配置重写） |
 | AI 翻译 | 豆包（火山方舟）/ OpenAI / Gemini，BYOK，浏览器直连 |
@@ -200,7 +221,8 @@ src/
 ├── components/
 │   ├── Navbar.jsx               # 吸顶导航栏：Logo、帮助 / 阅读 / 每日复习（角标）/ 词汇库 / 模式、☁️ 同步状态、⚙️ 菜单（Drive 同步、备份）
 │   ├── ModeMenu.jsx             # 「模式」菜单：常规辞典 / AI Agent、服务商、API Key、模型、测试连接
-│   ├── Reader.jsx               # max-w-2xl 居中的衬线排版阅读区；章节选择、上一章 / 下一章
+│   ├── Reader.jsx               # max-w-2xl 居中的衬线排版阅读区；章节选择、翻页、EPUB 插图、「原版页面」按钮
+│   ├── PdfViewer.jsx            # PDF 原版页面浮层：pdf.js 逐页渲染，关闭时销毁文档
 │   └── SelectionTooltip.jsx     # 划词气泡：鼠标用浮动气泡（定位计算），触屏用底部弹出卡片
 ├── pages/
 │   ├── ReaderPage.jsx           # 阅读页：当前文章 / 章节 + 划词气泡 + 高亮 + 阅读进度
@@ -211,6 +233,7 @@ src/
 ├── hooks/
 │   ├── useTextSelection.js      # 划词：鼠标 mouseup / 触屏 selectionchange + 点按查词；吸附完整单词、坐标、原句
 │   ├── useHighlights.js         # 根据生词本用 mark.js 高亮正文
+│   ├── useEpubImages.js         # EPUB 插图：从原始 EPUB 取出当前页的图片，翻页 / 离开时释放
 │   ├── usePopover.js            # 下拉浮层：点外部 / Esc 关闭
 │   ├── useHashRoute.js          # 极简 hash 路由
 │   └── useNow.js                # 定时刷新的当前时间
@@ -218,18 +241,20 @@ src/
 │   └── index.js                 # ts-fsrs 封装：记录 ↔ Card 转换、评分、间隔预览
 ├── db/
 │   ├── index.js                 # Dexie 数据库（v2）、生词增删（软删除）、更新释义、查询到期词、写回复习结果
-│   ├── articles.js              # 文章库：增删、阅读进度、当前文章、内置示例文章
+│   ├── articles.js              # 文章库：元数据增删、阅读进度、当前文章、本机正文 / 原始文件缓存与清理（最近 3 本）
 │   ├── backup.js                # JSON 导出 / 导入（生词 + 文章库，逐条合并）
 │   └── backupReminder.js        # 备份提醒：上次备份时间、是否需要提醒
 ├── services/
-│   ├── importer.js              # 导入解析：粘贴文本 / TXT / EPUB → 章节和段落
+│   ├── importer.js              # 导入解析：粘贴文本 / TXT / EPUB（含插图）→ 章节和段落；PDF 交给 pdf.js
+│   ├── pdf.js                   # PDF 导入：pdf.js 逐页提取文字、书签分章、扫描版检测、每段的原 PDF 页码
+│   ├── pdfLayout.js             # PDF 版面还原（纯函数）：行、段落、标题、列表、表格、双栏、页眉页脚
 │   ├── paginate.js              # 长章节分页（按段落边界，每页约 1800 词）
 │   ├── translate.js             # 查词入口：按模式分发、结果缓存、useLookup hook
 │   ├── dictionary.js            # 常规辞典：ECDICT 内置词典（懒加载 + 词形还原）+ MyMemory 兜底（候选筛选）
 │   └── ai.js                    # AI Agent：豆包 / OpenAI / Gemini 请求、JSON 解析、错误提示
 ├── sync/
-│   ├── index.js                 # 同步流程（下载 → 合并 → 写本地 → 上传）、自动同步、状态
-│   ├── google.js                # Google 授权（GIS）+ Drive 接口；OAuth Client ID
+│   ├── index.js                 # 同步流程（索引合并、上传新书、删除文件、清理缓存）、按需下载正文 / 原始文件、自动同步、状态
+│   ├── google.js                # Google 授权（GIS）+ Drive 接口（列表、下载、multipart / 分段上传、删除）；OAuth Client ID
 │   ├── merge.js                 # 逐条合并规则（Drive 同步和备份导入共用）
 │   └── events.js                # 本地数据变化通知（触发自动同步）
 ├── utils/
@@ -266,7 +291,16 @@ python3 scripts/build-dict.py ecdict.csv public/dict/ecdict-common.json
 
 ## 数据结构
 
-IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v2），两张表：`words`（索引：`id, word, due, state, createdAt, updatedAt`）和 `articles`（索引：`id, updatedAt`）。
+IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v3），四张表：
+
+| 表 | 内容 | 同步 | 索引 |
+|---|---|---|---|
+| `words` | 生词 | ✅ 索引文件 | `id, word, due, state, createdAt, updatedAt` |
+| `articles` | 书的元数据（不含正文） | ✅ 索引文件 | `id, updatedAt` |
+| `contents` | 书的正文，本机缓存（最近 3 本） | 单独文件，按需下载 | `id, lastOpenedAt, uploaded` |
+| `originals` | 原始 PDF / EPUB 的 Blob，本机缓存 | 单独文件，按需下载 | `id, lastOpenedAt, uploaded` |
+
+`uploaded`（0 / 1）表示是否已经上传到 Drive，只有已上传的才会被缓存清理；建索引是为了清理缓存时只读主键，不必把整本书读进内存。
 
 生词 `words`：
 
@@ -302,23 +336,38 @@ IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v2），两张表：`w
 }
 ```
 
-文章 `articles`：
+文章元数据 `articles`：
 
 ```js
 {
   id: "uuid",
   title: "The Little Test Book",
-  author: "Jane Author",            // EPUB 才有
-  kind: "epub",                     // paste / txt / epub
-  chapters: [{ title: "Chapter One", paragraphs: ["...", "..."] }],
+  author: "Jane Author",            // EPUB / PDF 才有
+  kind: "pdf",                      // paste / txt / epub / pdf
+  chapterCount: 3, wordCount: 1122, contentSize: 7439,          // 书架显示用
+  hasOriginal: true, originalName: "book.pdf", originalType: "application/pdf", originalSize: 64050,
   progress: { chapter: 1, page: 2, ratio: 0.42 }, // 读到第几章、第几页（都从 0 开始）、页内滚动位置
-  createdAt, updatedAt, deletedAt,  // 删除时清空 chapters，只留删除记录
+  createdAt, updatedAt, deletedAt,
+}
+```
+
+正文 `contents`（Drive 上的 `article-<id>.json` 同结构）：
+
+```js
+{
+  id: "uuid",
+  chapters: [{
+    title: "Chapter One",
+    paragraphs: ["文字段落", { type: "img", src: "OEBPS/images/fig1.png", alt: "..." }], // EPUB 插图记成对象
+    pages: [0, 0, 1],               // 仅 PDF：每段在原 PDF 里的页码（从 0 开始），用于「原版页面」
+  }],
+  lastOpenedAt, uploaded,           // 本机缓存信息，不上传
 }
 ```
 
 内置示例文章不存数据库（id 为 `sample`），不参与同步。当前打开的文章存在 localStorage（`jdra.currentArticle`），每台设备各自记。
 
-阶段三之前创建的旧记录没有这 5 个补充字段，读取时会自动补默认值，可以正常复习。v1 数据库升级到 v2 时，会给旧记录补上 `updatedAt`（取上次复习时间或创建时间）和 `deletedAt: null`。
+阶段三之前创建的旧记录没有这 5 个补充字段，读取时会自动补默认值，可以正常复习。v1 数据库升级到 v2 时，会给旧记录补上 `updatedAt`（取上次复习时间或创建时间）和 `deletedAt: null`。v2 升级到 v3 时，文章记录上的 `chapters` 搬到 `contents` 表，文章记录只留元数据。
 
 同一个词忽略大小写去重。调试时可在浏览器 DevTools → Application → IndexedDB 中查看 / 删除数据。
 
@@ -327,11 +376,12 @@ IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v2），两张表：`w
 ```js
 {
   "app": "jd-reading-assistant",
-  "version": 2,                       // v1 只有 words
+  "version": 3,                       // v1 只有 words；v2 的正文在 articles[].chapters 里
   "exportedAt": "2026-11-18T23:10:00.000Z",
   "count": 2,
   "words": [ /* 生词记录（不含已删除的） */ ],
-  "articles": [ /* 文章记录 */ ]
+  "articles": [ /* 文章元数据 */ ],
+  "contents": [ /* 本机缓存着的书的正文 { id, chapters } */ ]
 }
 ```
 
@@ -341,8 +391,10 @@ IndexedDB 数据库 `jd-reading-assistant`（Dexie schema v2），两张表：`w
 
 - mark.js 会直接修改 DOM；切换文章 / 章节时用 key 让整个 `<article>` 重新挂载，避免和 React 冲突
 - 不连接 Google Drive 时只能手动导出备份（纯前端无法在后台写本地文件），只能靠提醒
-- Google Drive 同步只用模拟的 Google 接口测过（两台设备合并、删除同步、授权过期、401），还没用真实 Google 账号验证；iPhone 主屏幕 App 里 Google 授权弹窗能否正常工作需要真机确认
-- 同步是“最后修改的胜出”：同一个词在两台设备上离线各复习了一次，只会保留后同步的那次；同步文件是一个完整 JSON，书很多时上传会变慢
+- Google Drive 同步只用模拟的 Google 接口测过（两台设备合并、按需下载、缓存清理、删除同步、授权过期、401），还没用真实 Google 账号验证；**真实 Drive 的分段上传（4 MB 以上的原始文件）是否能拿到上传会话地址**、iPhone 主屏幕 App 里 Google 授权弹窗能否正常工作，都需要实测
+- 同步是“最后修改的胜出”：同一个词在两台设备上离线各复习了一次，只会保留后同步的那次
+- 没连接 Google Drive 时，书只存在本机，不会被缓存清理；被清理过的书在断开 Drive 后无法打开（会提示连接 Drive）
+- PDF：扫描版（图片）不支持；双栏、复杂排版的还原效果不保证；在 iPhone / iPad 上导入几十 MB 的 PDF 可能很慢或内存不足，需要真机测试；有密码的 PDF 的提示没有实测
 - 生词出处只记录文章标题，删除文章后生词仍保留
 - 备份提醒只统计"新增"的词；取消标记（删除）不算作需要备份的变更
 - 高亮不识别词形变化；生词很多时，每次增删都要重新全文匹配一遍，是潜在的性能瓶颈

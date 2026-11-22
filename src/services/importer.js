@@ -1,11 +1,16 @@
 // 导入阅读材料：粘贴的文本、TXT 文件、EPUB 电子书 → { title, author, chapters: [{ title, paragraphs }] }
 // 全部在浏览器本地解析，文件不会上传到任何地方。
 
-const MAX_FILE_BYTES = 30 * 1024 * 1024 // 30 MB
+const MB = 1024 * 1024
+const MAX_FILE_BYTES = 30 * MB // TXT / EPUB 上限
+const MAX_PDF_BYTES = 200 * MB // PDF 常带大量图片和字体，上限放宽（存下来的文字通常只有一两 MB）
 const PARAGRAPHS_PER_PART = 60 // 没有章节标题的长文本，按这个段落数自动分段
 
-// "Chapter 1" / "CHAPTER XII. The Return" / "Part Two" / "Book III" 这类章节标题
-const CHAPTER_HEADING = /^(chapter|book|part|section|letter)\s+([0-9]+|[ivxlcdm]+|[a-z]+(-[a-z]+)?)\b[\s.:—-]*.{0,60}$/i
+// "Chapter 1" / "CHAPTER XII. The Return" / "Part Two" / "Book III" 这类章节标题。
+// 编号只认数字、罗马数字和英文数字词，避免 "Section Key Points"、"Part of the problem" 这类普通句子被当成章节
+const NUMBER_WORDS =
+  'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final'
+const CHAPTER_HEADING = new RegExp(`^(chapter|book|part|section|letter)\\s+([0-9]+|[ivxlcdm]+|${NUMBER_WORDS})\\b[\\s.:|—-]*.{0,70}$`, 'i')
 
 const clean = (s) => s.replace(/\s+/g, ' ').trim()
 
@@ -19,11 +24,11 @@ function toParagraphs(text) {
 }
 
 /** 段落 → 章节：识别章节标题；识别不到又太长时，自动分成若干部分 */
-function toChapters(paragraphs) {
+export function toChapters(paragraphs) {
   const chapters = []
   let current = { title: null, paragraphs: [] }
   for (const p of paragraphs) {
-    if (p.length < 80 && CHAPTER_HEADING.test(p)) {
+    if (p.length < 90 && CHAPTER_HEADING.test(p)) {
       if (current.paragraphs.length || current.title) chapters.push(current)
       current = { title: p, paragraphs: [] }
     } else {
@@ -40,6 +45,8 @@ function toChapters(paragraphs) {
     front = first.paragraphs
     nonEmpty = nonEmpty.slice(1)
   }
+  // 第一个章节标题之前还有不少内容（简介、目录等）：作为没有标题的「开头」部分
+  if (nonEmpty.length > 1 && !nonEmpty[0].title) nonEmpty[0] = { ...nonEmpty[0], title: '开头' }
   if (nonEmpty.length > 1) return { chapters: nonEmpty, front }
   const all = nonEmpty[0]?.paragraphs ?? []
   if (all.length <= PARAGRAPHS_PER_PART * 2) return { chapters: [{ title: nonEmpty[0]?.title ?? null, paragraphs: all }], front }
@@ -88,19 +95,35 @@ function resolvePath(base, href) {
   return out.join('/')
 }
 
-// 正文块元素；只取“最内层”的那一级，避免 <li><p>…</p></li> 被重复提取
-const BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, pre'
+// 正文块元素；只取“最内层”的那一级，避免 <li><p>…</p></li>、<div><p>…</p></div> 被重复提取。
+// 包含 div：不少老式 EPUB（尤其 EPUB 2）用 <div class="para"> 而不是 <p> 排段落
+const BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, div'
 
-function extractBlocks(html) {
+/**
+ * 从一章的 XHTML 里按顺序取出段落和插图。
+ * 插图记成 { type: 'img', src, alt }，src 是图片在 EPUB 包里的完整路径（阅读时再从原始 EPUB 里取出来显示）。
+ * chapterDir：这一章文件所在的目录，用来解析图片的相对路径
+ */
+function extractBlocks(html, chapterDir) {
   let doc = parseXml(html, 'application/xhtml+xml')
   if (doc.getElementsByTagName('parsererror').length) doc = parseXml(html, 'text/html')
   const body = doc.body ?? doc.getElementsByTagNameNS('*', 'body')[0]
   if (!body) return { heading: null, paragraphs: [] }
 
-  const blocks = [...body.querySelectorAll(BLOCK_SELECTOR)].filter((el) => !el.querySelector(BLOCK_SELECTOR))
-  let paragraphs = blocks.map((el) => clean(el.textContent)).filter(Boolean)
+  let paragraphs = []
+  // 按文档顺序遍历：最内层的文字块 + 图片（<img>，或 SVG 里的 <image>）
+  for (const el of body.querySelectorAll(`${BLOCK_SELECTOR}, img, image`)) {
+    const tag = el.localName.toLowerCase()
+    if (tag === 'img' || tag === 'image') {
+      const href = el.getAttribute('src') || el.getAttribute('href') || el.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+      if (href && !href.startsWith('data:')) paragraphs.push({ type: 'img', src: resolvePath(chapterDir, href), alt: el.getAttribute('alt') || '' })
+    } else if (!el.querySelector(BLOCK_SELECTOR)) {
+      const text = clean(el.textContent)
+      if (text) paragraphs.push(text)
+    }
+  }
   // 有些电子书全用 <div> 排版：退回按换行切分整个正文
-  if (!paragraphs.length) paragraphs = toParagraphs(body.textContent)
+  if (!paragraphs.some((p) => typeof p === 'string')) paragraphs = [...paragraphs, ...toParagraphs(body.textContent)]
 
   const headingEl = body.querySelector('h1, h2, h3')
   const heading = headingEl ? clean(headingEl.textContent) : null
@@ -145,27 +168,45 @@ export async function parseEpub(file) {
       { href: el.getAttribute('href'), type: el.getAttribute('media-type'), props: el.getAttribute('properties') ?? '' },
     ]),
   )
-  const spine = byTag(opf, 'itemref').map((el) => manifest.get(el.getAttribute('idref'))).filter(Boolean)
+  const spine = byTag(opf, 'itemref')
+    .map((el) => {
+      const item = manifest.get(el.getAttribute('idref'))
+      return item && { ...item, linear: el.getAttribute('linear') }
+    })
+    .filter(Boolean)
 
   const chapters = []
   for (const item of spine) {
-    if (!/html|xml/.test(item.type ?? '') || item.props.includes('nav')) continue
-    const html = await zip.file(resolvePath(baseDir, item.href))?.async('string')
+    // 跳过：非正文文件、EPUB 3 的目录页（nav）、spine 里标了 linear="no" 的辅助页面（封面等）
+    if (!/html|xml/.test(item.type ?? '') || item.props.includes('nav') || item.linear === 'no') continue
+    const chapterPath = resolvePath(baseDir, item.href)
+    const html = await zip.file(chapterPath)?.async('string')
     if (!html) continue
-    const { heading, paragraphs } = extractBlocks(html)
+    const chapterDir = chapterPath.includes('/') ? chapterPath.slice(0, chapterPath.lastIndexOf('/')) : ''
+    const { heading, paragraphs } = extractBlocks(html, chapterDir)
+    // 只有图片、没有文字的页面（比如插图页）也保留
     if (paragraphs.length) chapters.push({ title: heading, paragraphs })
   }
-  if (!chapters.length) throw new Error('没有在这本 EPUB 里找到正文')
+  if (!chapters.some((c) => c.paragraphs.some((p) => typeof p === 'string'))) throw new Error('没有在这本 EPUB 里找到正文')
   return { title, author, chapters }
 }
 
-/** 根据文件类型导入 */
-export async function parseFile(file) {
-  if (file.size > MAX_FILE_BYTES) throw new Error('文件太大（超过 30 MB）')
+/**
+ * 根据文件类型导入。onProgress 只对 PDF 有效（逐页解析的进度）。
+ * PDF / EPUB 会带上 original（原始文件本身），保存下来用于查看原版页面、显示插图
+ */
+export async function parseFile(file, { onProgress } = {}) {
   const name = file.name.toLowerCase()
-  if (name.endsWith('.epub')) return { ...(await parseEpub(file)), kind: 'epub' }
+  const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf'
+  const limit = isPdf ? MAX_PDF_BYTES : MAX_FILE_BYTES
+  if (file.size > limit) throw new Error(`文件太大（超过 ${limit / MB} MB）`)
+  if (name.endsWith('.epub')) return { ...(await parseEpub(file)), kind: 'epub', original: file }
+  if (isPdf) {
+    const { parsePdf } = await import('./pdf') // 按需加载 pdf.js
+    return { ...(await parsePdf(file, { onProgress })), kind: 'pdf', original: file }
+  }
   if (name.endsWith('.txt') || name.endsWith('.md') || file.type.startsWith('text/')) {
     return { ...parseText(await file.text(), file.name.replace(/\.[^.]+$/, ''), { fallbackTitle: true }), kind: 'txt' }
   }
-  throw new Error('只支持 .txt 和 .epub 文件')
+  throw new Error('只支持 .txt、.epub 和 .pdf 文件')
 }

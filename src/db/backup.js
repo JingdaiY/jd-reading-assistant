@@ -1,17 +1,25 @@
-import { createWordRecord, db, isActive } from '.'
+import { contentStats, createWordRecord, db, isActive } from '.'
 import { markDirty } from '../sync/events'
 import { articleKey, mergeRecords, wordKey } from '../sync/merge'
 import { downloadJson, todayStamp } from '../utils/download'
 import { getLastBackupAt, setLastBackupAt } from './backupReminder'
 
 const APP_ID = 'jd-reading-assistant'
-// v1：只有 words；v2：words + articles
-const BACKUP_VERSION = 2
+// v1：只有 words；v2：words + articles（正文在 articles[].chapters 里）；
+// v3：words + articles（元数据）+ contents（本机缓存着的书的正文）。原始 PDF / EPUB 文件太大，不放进备份
+const BACKUP_VERSION = 3
 
 /** 把生词本和文章库导出为 JSON 文件并触发浏览器下载 */
 export async function exportWords() {
   const words = (await db.words.orderBy('createdAt').toArray()).filter(isActive)
   const articles = (await db.articles.toArray()).filter(isActive)
+  const activeIds = new Set(articles.map((a) => a.id))
+  const contents = []
+  for (const id of await db.contents.toCollection().primaryKeys()) {
+    if (!activeIds.has(id)) continue
+    const c = await db.contents.get(id)
+    contents.push({ id, chapters: c.chapters })
+  }
   const backup = {
     app: APP_ID,
     version: BACKUP_VERSION,
@@ -19,6 +27,7 @@ export async function exportWords() {
     count: words.length,
     words,
     articles,
+    contents,
   }
 
   downloadJson(backup, `jd-reading-words-${todayStamp()}.json`)
@@ -34,9 +43,15 @@ function normalizeWord(item) {
   return { ...base, ...item, word, updatedAt: item.updatedAt ?? item.lastReview ?? item.createdAt ?? base.updatedAt }
 }
 
-function normalizeArticle(item) {
-  if (!item?.id || !Array.isArray(item.chapters)) return null
-  return { progress: { chapter: 0, ratio: 0 }, deletedAt: null, ...item, updatedAt: item.updatedAt ?? item.createdAt }
+/** 文章元数据；v2 备份里正文在 chapters 上，拆出来放进 contents */
+function normalizeArticle(item, contents) {
+  if (!item?.id || !item.title) return null
+  const { chapters, ...meta } = item
+  if (Array.isArray(chapters)) {
+    contents.set(item.id, chapters)
+    Object.assign(meta, { hasOriginal: false, ...contentStats(chapters), ...meta })
+  }
+  return { progress: { chapter: 0, ratio: 0 }, deletedAt: null, ...meta, updatedAt: meta.updatedAt ?? meta.createdAt }
 }
 
 /**
@@ -57,9 +72,10 @@ export async function importWords(file) {
 
   const incomingWords = items.map(normalizeWord).filter(Boolean)
   const skipped = items.length - incomingWords.length
-  const incomingArticles = (Array.isArray(data?.articles) ? data.articles : []).map(normalizeArticle).filter(Boolean)
+  const incomingContents = new Map((Array.isArray(data?.contents) ? data.contents : []).filter((c) => c?.id && Array.isArray(c.chapters)).map((c) => [c.id, c.chapters]))
+  const incomingArticles = (Array.isArray(data?.articles) ? data.articles : []).map((a) => normalizeArticle(a, incomingContents)).filter(Boolean)
 
-  const result = await db.transaction('rw', db.words, db.articles, async () => {
+  const result = await db.transaction('rw', db.words, db.articles, db.contents, async () => {
     const localWords = await db.words.toArray()
     const localKeys = new Set(localWords.map(wordKey))
     const w = mergeRecords(localWords, incomingWords, wordKey)
@@ -67,6 +83,10 @@ export async function importWords(file) {
 
     const a = mergeRecords(await db.articles.toArray(), incomingArticles, articleKey)
     await db.articles.bulkPut(a.localWrites)
+    // 备份里带的正文：本机还没有的才存（标记未上传，连接了 Drive 时会上传）
+    for (const [id, chapters] of incomingContents) {
+      if (!(await db.contents.where('id').equals(id).count())) await db.contents.put({ id, chapters, lastOpenedAt: new Date().toISOString(), uploaded: 0 })
+    }
 
     const added = w.localWrites.filter((r) => !localKeys.has(wordKey(r))).length
     return { added, updated: w.localWrites.length - added, skipped, articles: a.localWrites.length }

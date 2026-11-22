@@ -30,6 +30,40 @@ db.version(2)
       }),
   )
 
+// v3：书的“目录信息”和“内容”分开存，打开书时才把内容读进内存，大文件也能按需缓存
+// - articles：只有元数据（书名、作者、章节数、字数、阅读进度……），书架页只读这张表，会同步
+// - contents：书的正文（章节和段落），本机缓存，可被清理（已上传到 Drive 的可以随时再下载）
+// - originals：原始文件（PDF / EPUB）的 Blob，本机缓存，可被清理；用于“查看原版页面”和 EPUB 插图
+db.version(3)
+  .stores({
+    words: 'id, word, due, state, createdAt, updatedAt',
+    articles: 'id, updatedAt',
+    // uploaded 用 0 / 1 存并建索引：清理缓存时只查主键和索引，不必把整本书读进内存
+    contents: 'id, lastOpenedAt, uploaded',
+    originals: 'id, lastOpenedAt, uploaded',
+  })
+  .upgrade(async (tx) => {
+    // 把 v2 里存在 articles 上的 chapters 搬到 contents 表
+    const articles = await tx.table('articles').toArray()
+    for (const a of articles) {
+      if (!Array.isArray(a.chapters)) continue
+      if (!a.deletedAt && a.chapters.length) {
+        await tx.table('contents').put({ id: a.id, chapters: a.chapters, lastOpenedAt: a.updatedAt, uploaded: 0 })
+      }
+      const { chapters, ...meta } = a
+      await tx.table('articles').put({ ...meta, ...contentStats(chapters), hasOriginal: false })
+    }
+  })
+
+const isText = (p) => typeof p === 'string'
+
+/** 由正文算出书架要显示的统计信息：章节数、字数、正文大小 */
+export function contentStats(chapters) {
+  let wordCount = 0
+  for (const c of chapters) for (const p of c.paragraphs) if (isText(p)) wordCount += p.split(/\s+/).filter(Boolean).length
+  return { chapterCount: chapters.length, wordCount, contentSize: new Blob([JSON.stringify(chapters)]).size }
+}
+
 // FSRS 卡片状态（与 ts-fsrs 的 State 枚举一致）
 export const CardState = { New: 0, Learning: 1, Review: 2, Relearning: 3 }
 

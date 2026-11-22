@@ -19,6 +19,24 @@ function PageNav({ nav, onPrev, onNext }) {
   )
 }
 
+/** EPUB 插图：图片还没取出来时显示占位框；原始文件拿不到时显示图片说明 */
+function Figure({ item, url, error }) {
+  if (url) {
+    return (
+      <figure className="my-2">
+        <img src={url} alt={item.alt} className="mx-auto max-h-[70vh] max-w-full rounded" />
+        {item.alt && <figcaption className="mt-2 text-center font-sans text-xs text-stone-400">{item.alt}</figcaption>}
+      </figure>
+    )
+  }
+  return (
+    <figure className="my-2 rounded-lg border border-dashed border-stone-300 px-4 py-6 text-center font-sans text-xs text-stone-400">
+      {error ? `插图暂时无法显示：${error}` : '正在加载插图…'}
+      {item.alt && <div className="mt-1">{item.alt}</div>}
+    </figure>
+  )
+}
+
 /** 示例文章末尾的提示：还没导入过自己的材料时，引导去书架导入 */
 function ImportHint() {
   return (
@@ -35,7 +53,22 @@ function ImportHint() {
   )
 }
 
-export default function Reader({ article, chapter, page, paragraphs, pageCount, nav, onChapterChange, onPrev, onNext, showImportHint, ref }) {
+export default function Reader({
+  article,
+  chapter,
+  page,
+  paragraphs,
+  pageCount,
+  nav,
+  onChapterChange,
+  onPrev,
+  onNext,
+  showImportHint,
+  images,
+  onOpenOriginal,
+  openingOriginal,
+  ref,
+}) {
   const current = article.chapters[chapter] ?? article.chapters[0]
   const total = article.chapters.length
   const isBook = total > 1
@@ -52,6 +85,17 @@ export default function Reader({ article, chapter, page, paragraphs, pageCount, 
         >
           <span aria-hidden>📚</span> 书架 · 导入
         </a>
+        {onOpenOriginal && (
+          // PDF：查看当前这一页正文对应的原版页面（图片、图表、原始排版）
+          <button
+            type="button"
+            onClick={onOpenOriginal}
+            disabled={openingOriginal}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 shadow-sm transition-colors hover:bg-stone-100 disabled:opacity-50"
+          >
+            <span aria-hidden>📄</span> {openingOriginal ? '正在打开…' : '原版页面'}
+          </button>
+        )}
         {isBook && (
           <select
             aria-label="选择章节"
@@ -85,9 +129,13 @@ export default function Reader({ article, chapter, page, paragraphs, pageCount, 
         ref={ref}
         className="mt-10 space-y-6 font-serif text-[1.1875rem] leading-[1.8] text-stone-800"
       >
-        {paragraphs.map((p, i) => (
-          <p key={i}>{p}</p>
-        ))}
+        {paragraphs.map((p, i) =>
+          typeof p === 'string' ? (
+            <p key={i}>{p}</p>
+          ) : (
+            <Figure key={i} item={p} url={images?.urls.get(p.src)} error={images?.error} />
+          ),
+        )}
       </article>
 
       <PageNav nav={nav} onPrev={onPrev} onNext={onNext} />
