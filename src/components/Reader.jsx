@@ -26,15 +26,15 @@ import { classifyParagraph } from '../utils/paragraphStyle'
  * 一段正文：按分类显示不同样式（小标题、列表、表格行、问答）。
  * 各部分拼起来就是原文，划词 / 原句 / 高亮都不受影响
  */
-function Paragraph({ text }) {
+function Paragraph({ text, pi }) {
   const { kind, marker, label, body } = classifyParagraph(text)
   const strong = 'font-semibold text-stone-900'
   if (kind === 'heading') {
-    return <h3 className="pt-4 font-sans text-[1.0625rem] leading-snug font-semibold tracking-tight text-stone-900">{body}</h3>
+    return <h3 data-pi={pi} className="pt-4 font-sans text-[1.0625rem] leading-snug font-semibold tracking-tight text-stone-900">{body}</h3>
   }
   if (kind === 'question') {
     return (
-      <p className={`border-l-2 border-stone-300 pl-4 ${strong}`}>
+      <p data-pi={pi} className={`border-l-2 border-stone-300 pl-4 ${strong}`}>
         <span className="text-stone-400">{marker}</span>
         {body}
       </p>
@@ -44,7 +44,7 @@ function Paragraph({ text }) {
     return (
       // 列表项：缩进，编号 / 圆点挂在左边；开头的“小标题:”加粗
       // 编号：原文里的“1. ”本身挂在左边；圆点：用 CSS 画“•”（伪元素不算文字），原文的“- ”隐藏
-      <p className={`relative pl-7 ${kind === 'bullet' ? "before:absolute before:left-1 before:text-stone-400 before:content-['•']" : ''}`}>
+      <p data-pi={pi} className={`relative pl-7 ${kind === 'bullet' ? "before:absolute before:left-1 before:text-stone-400 before:content-['•']" : ''}`}>
         <span className={kind === 'bullet' ? 'hidden' : 'absolute left-0 font-sans text-[0.9em] text-stone-400'}>{marker}</span>
         {label && <strong className={strong}>{label}</strong>}
         {body}
@@ -53,13 +53,13 @@ function Paragraph({ text }) {
   }
   if (kind === 'labeled' || kind === 'answer') {
     return (
-      <p>
+      <p data-pi={pi}>
         <strong className={strong}>{label}</strong>
         {body}
       </p>
     )
   }
-  return <p>{text}</p>
+  return <p data-pi={pi}>{text}</p>
 }
 
 /** 阅读区宽度切换（窄 / 标准 / 宽），只在电脑 / 平板上显示 */
@@ -86,17 +86,17 @@ function WidthSwitch() {
 }
 
 /** EPUB 插图：图片还没取出来时显示占位框；原始文件拿不到时显示图片说明 */
-function Figure({ item, url, error }) {
+function Figure({ item, url, error, pi }) {
   if (url) {
     return (
-      <figure className="my-2">
+      <figure data-pi={pi} className="my-2">
         <img src={url} alt={item.alt} className="mx-auto max-h-[70vh] max-w-full rounded" />
         {item.alt && <figcaption className="mt-2 text-center font-sans text-xs text-stone-400">{item.alt}</figcaption>}
       </figure>
     )
   }
   return (
-    <figure className="my-2 rounded-lg border border-dashed border-stone-300 px-4 py-6 text-center font-sans text-xs text-stone-400">
+    <figure data-pi={pi} className="my-2 rounded-lg border border-dashed border-stone-300 px-4 py-6 text-center font-sans text-xs text-stone-400">
       {error ? `插图暂时无法显示：${error}` : '正在加载插图…'}
       {item.alt && <div className="mt-1">{item.alt}</div>}
     </figure>
@@ -124,6 +124,7 @@ export default function Reader({
   chapter,
   page,
   paragraphs,
+  paragraphOffset = 0,
   pageCount,
   nav,
   onChapterChange,
@@ -199,13 +200,14 @@ export default function Reader({
       <article
         key={`${article.id}:${chapter}:${page}`}
         ref={ref}
-        className="mt-10 space-y-6 font-serif text-[1.1875rem] leading-[1.8] text-stone-800"
+        // 触屏：竖向照常滚动、双指缩放，横向的手指移动交给「划横线」手势
+        className="mt-10 space-y-6 font-serif [touch-action:pan-y_pinch-zoom] text-[1.1875rem] leading-[1.8] text-stone-800"
       >
         {paragraphs.map((p, i) =>
           typeof p === 'string' ? (
-            <Paragraph key={i} text={p} />
+            <Paragraph key={i} text={p} pi={paragraphOffset + i} />
           ) : (
-            <Figure key={i} item={p} url={images?.urls.get(p.src)} error={images?.error} />
+            <Figure key={i} pi={paragraphOffset + i} item={p} url={images?.urls.get(p.src)} error={images?.error} />
           ),
         )}
       </article>

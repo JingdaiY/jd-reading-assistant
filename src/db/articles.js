@@ -111,6 +111,26 @@ export async function saveProgress(id, progress) {
   markDirty()
 }
 
+// 「在这里结束本次阅读」横线：{ chapter, paragraph, offset }（第几章、本章第几段、那一行从段落第几个字开始），null = 没有。
+// 存在文章元数据里，跟着书同步到其他设备；内置示例文章不进数据库，存在 localStorage
+const SAMPLE_BOOKMARK_KEY = 'jdra.sampleBookmark'
+export function getSampleBookmark() {
+  try {
+    return JSON.parse(localStorage.getItem(SAMPLE_BOOKMARK_KEY)) ?? null
+  } catch {
+    return null
+  }
+}
+export async function saveBookmark(id, bookmark) {
+  if (id === SAMPLE_ID) {
+    if (bookmark) localStorage.setItem(SAMPLE_BOOKMARK_KEY, JSON.stringify(bookmark))
+    else localStorage.removeItem(SAMPLE_BOOKMARK_KEY)
+    return
+  }
+  await db.articles.update(id, { bookmark: bookmark ?? null, updatedAt: nowIso() })
+  markDirty()
+}
+
 // ---------------- 本机缓存：正文 / 原始文件 ----------------
 
 /** 读本机缓存的正文（没有返回 null），并记录“最近打开” */

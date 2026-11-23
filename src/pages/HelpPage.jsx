@@ -131,6 +131,9 @@ export default function HelpPage() {
               <strong className="text-stone-800">单击已高亮的词</strong>直接弹出意思，不用重新划选。高亮的是词组（如 <code>a wealth of</code>
               ）时，单击其中任意位置查的是整个词组；想只查其中某个词，<strong className="text-stone-800">双击</strong>那个词或拖选它。
             </li>
+            <li>
+              <strong className="text-stone-800">在这里结束本次阅读</strong>：按住鼠标左键在正文上横着来回划两下以上（像涂掉一行字），会在最近的那一行下面画线，并问「在这里结束本次阅读？」。点「是」记下位置，下次打开这本书会自动跳到横线处。在横线那一行上<strong className="text-stone-800">双击</strong>取消横线（不查词）；其他地方双击照旧查词。每本书只有一条横线，调整阅读宽度、换设备后仍在同一句话那里。
+            </li>
             <li>再次选中（或单击）已标记的词，按钮显示「已标记 ✓」，再点一次即可取消标记（有笔记时会先确认）。</li>
             <li>
               <strong className="text-stone-800">笔记</strong>：气泡里点「📝 添加笔记」，写这个词在这里的意思、例句、联想。还没标记的词，点 Mark 时和单词一起保存（Mark 就是保存）；已标记的词再次选中会显示「📝 我的笔记」，点「编辑」修改，改完点「保存」，点「取消」放弃修改。笔记会同步到其他设备，复习时卡片背面也会显示。
@@ -326,6 +329,9 @@ export default function HelpPage() {
             </li>
             <li>
               <strong className="text-stone-800">长按并拖动选区</strong>：查词组或整句，松手约半秒后弹出
+            </li>
+            <li>
+              <strong className="text-stone-800">手指横着来回划两下以上</strong>：画「结束阅读」横线；双击横线那一行取消
             </li>
             <li>点击正文空白处关闭释义卡片；如果单词被卡片挡住，页面会自动往上滚</li>
             <li>每日复习：点卡片任意位置翻开答案，再点「忘记 / 模糊 / 认识」</li>

@@ -1,10 +1,21 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PdfViewer from '../components/PdfViewer'
+import ReadingStopLine from '../components/ReadingStopLine'
 import Reader from '../components/Reader'
 import SelectionTooltip from '../components/SelectionTooltip'
 import { toggleWord, updateWordNote } from '../db'
-import { getArticle, getArticles, getCurrentArticleId, SAMPLE, SAMPLE_CONTENT, saveProgress, setCurrentArticleId } from '../db/articles'
+import {
+  getArticle,
+  getArticles,
+  getCurrentArticleId,
+  getSampleBookmark,
+  SAMPLE,
+  SAMPLE_CONTENT,
+  saveBookmark,
+  saveProgress,
+  setCurrentArticleId,
+} from '../db/articles'
 import { useEpubImages } from '../hooks/useEpubImages'
 import { useHighlights } from '../hooks/useHighlights'
 import { useTextSelection } from '../hooks/useTextSelection'
@@ -61,6 +72,16 @@ export default function ReaderPage({ words }) {
   const savedPage = progress.page ?? Math.floor((progress.ratio ?? 0) * pages.length)
   const page = clamp(posOverride?.page ?? savedPage, 0, pages.length - 1)
 
+  // 「在这里结束本次阅读」横线。示例文章不在数据库里，横线放在这个页面的 state + localStorage
+  const [sampleBookmark, setSampleBookmark] = useState(getSampleBookmark)
+  const bookmark = (meta?.id === SAMPLE.id ? sampleBookmark : meta?.bookmark) ?? null
+  const [scrollToBookmark, setScrollToBookmark] = useState(false)
+  const setBookmark = (bm) => {
+    if (meta.id === SAMPLE.id) setSampleBookmark(bm)
+    saveBookmark(meta.id, bm)
+  }
+  const onBookmarkScrolled = useCallback(() => setScrollToBookmark(false), [])
+
   const { selection } = useTextSelection(articleRef, tooltipRef)
   const images = useEpubImages(article, pages[page] ?? [])
 
@@ -93,6 +114,17 @@ export default function ReaderPage({ words }) {
   useEffect(() => {
     if (!article || restored.current) return
     restored.current = true
+    // 有「结束阅读」横线：直接翻到横线所在的那一页，画出来后滚到横线处
+    const bm = meta.id === SAMPLE.id ? sampleBookmark : meta.bookmark
+    const chapters = article.chapters
+    if (bm && chapters[bm.chapter] && bm.paragraph < chapters[bm.chapter].paragraphs.length) {
+      let start = 0
+      const bmPages = paginate(chapters[bm.chapter].paragraphs)
+      const bmPage = bmPages.findIndex((pg) => (start += pg.length) > bm.paragraph)
+      setPosOverride({ chapter: bm.chapter, page: Math.max(0, bmPage) })
+      setScrollToBookmark(true)
+      return
+    }
     // 页内滚动位置只对新版进度有意义（旧版的 ratio 是整章的位置，已经换算成页码了）
     const ratio = article.progress?.page != null ? (article.progress.ratio ?? 0) : 0
     if (ratio > 0) {
@@ -100,7 +132,7 @@ export default function ReaderPage({ words }) {
         window.scrollTo(0, ratio * (document.documentElement.scrollHeight - window.innerHeight))
       })
     }
-  }, [article])
+  }, [article]) // 只在第一次加载时恢复一次（用当时保存的横线 / 进度）
 
   // 滚动时（停下来后）保存阅读位置
   useEffect(() => {
@@ -206,6 +238,7 @@ export default function ReaderPage({ words }) {
         chapter={chapter}
         page={page}
         paragraphs={pages[page]}
+        paragraphOffset={firstParagraph}
         pageCount={pages.length}
         nav={nav}
         onChapterChange={(n) => goTo(n, 0)}
@@ -215,6 +248,17 @@ export default function ReaderPage({ words }) {
         onOpenOriginal={article.kind === 'pdf' && article.hasOriginal ? openOriginal : null}
         openingOriginal={!!viewer?.loading}
         showImportHint={article.id === SAMPLE.id && libraryCount === 0}
+      />
+
+      <ReadingStopLine
+        containerRef={articleRef}
+        chapter={chapter}
+        pageKey={`${article.id}:${chapter}:${page}`}
+        bookmark={bookmark}
+        onSave={setBookmark}
+        onRemove={() => setBookmark(null)}
+        scrollRequest={scrollToBookmark}
+        onScrolled={onBookmarkScrolled}
       />
 
       {viewer?.blob && <PdfViewer blob={viewer.blob} startPage={viewer.startPage} onClose={() => setViewer(null)} />}
