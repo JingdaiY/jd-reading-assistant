@@ -4,31 +4,71 @@ import { useLookup } from '../services/translate'
 const GAP = 10 // 气泡与选区之间的间距
 const EDGE = 12 // 气泡与视口左右边缘的最小留白
 
-/** 笔记：写这个词在这里的意思、例句、联想……标记时一起保存；已标记的词可以修改 */
+/**
+ * 笔记：写这个词在这里的意思、例句、联想……
+ * - 还没标记：输入框；点 Mark 时和单词一起保存
+ * - 已标记、没在编辑：笔记显示成普通文字（已保存的样子），旁边「编辑」
+ * - 已标记、正在编辑：输入框；改了内容后主按钮变成「保存」（见 LookupContent）
+ */
+/** 输入框出现时自动聚焦，光标放在已有内容的末尾（点「编辑」后接着往后写） */
+const caretToEnd = (el) => {
+  if (!el || el.dataset.focused) return
+  el.dataset.focused = '1'
+  el.focus()
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
 function NoteSection({ noteCtl, marked, large }) {
-  const { open, setOpen, draft, setDraft, dirty, save, saved } = noteCtl
-  if (!open) {
+  const { open, setOpen, editing, startEditing, cancelEditing, draft, setDraft, note, dirty } = noteCtl
+  const textareaClass =
+    'w-full resize-none rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-base leading-relaxed text-stone-700 outline-none focus:border-stone-400 focus:bg-white sm:text-sm'
+
+  // 已标记、没在编辑：显示已保存的笔记
+  if (marked && !editing) {
+    if (!note) {
+      return (
+        <button type="button" onClick={startEditing} className="mt-3 text-xs text-stone-400 transition-colors hover:text-stone-700">
+          📝 添加笔记
+        </button>
+      )
+    }
+    return (
+      <div className="mt-3 rounded-md bg-amber-50/70 px-3 py-2 text-sm leading-relaxed whitespace-pre-line text-stone-700">
+        <div className="mb-0.5 flex items-center justify-between text-[11px]">
+          <span className="font-medium text-amber-700">📝 我的笔记</span>
+          <button type="button" onClick={startEditing} className="rounded px-1.5 text-stone-400 hover:bg-white hover:text-stone-700">
+            编辑
+          </button>
+        </div>
+        {note}
+      </div>
+    )
+  }
+
+  // 还没标记：先点「添加笔记」再出现输入框
+  if (!marked && !open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className="mt-3 text-xs text-stone-400 transition-colors hover:text-stone-700">
         📝 添加笔记
       </button>
     )
   }
+
   return (
     <div className="mt-3">
       <textarea
+        ref={caretToEnd}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         rows={large ? 3 : 2}
-        autoFocus={!draft}
         placeholder="笔记：在这里的意思、例句、联想……"
-        className="w-full resize-none rounded-md border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-base leading-relaxed text-stone-700 outline-none focus:border-stone-400 focus:bg-white sm:text-sm"
+        className={textareaClass}
       />
       <div className="mt-1 flex items-center justify-between text-[11px] text-stone-400">
-        <span>{marked ? (dirty ? '关闭气泡时会自动保存' : saved ? '✓ 已保存' : '') : '点 Mark 时和单词一起保存'}</span>
-        {marked && dirty && (
-          <button type="button" onClick={save} className="rounded px-2 py-0.5 font-medium text-stone-600 hover:bg-stone-100">
-            保存笔记
+        <span>{marked ? (dirty ? '点「保存」保存笔记' : '') : '点 Mark 时和单词一起保存'}</span>
+        {marked && (
+          <button type="button" onClick={cancelEditing} className="rounded px-1.5 hover:bg-stone-100 hover:text-stone-700">
+            取消
           </button>
         )}
       </div>
@@ -84,7 +124,17 @@ function LookupContent({ selection, lookup, marked, onToggleMark, noteCtl, large
         <span className="text-[11px] tracking-wide text-stone-300">
           {status === 'loading' ? `${source} 查询中…` : data?.via ? `${source} · ${data.via}` : source}
         </span>
-        {/* 再次点击即可取消标记；已标记时悬停提示“取消标记”（触屏没有悬停，直接写在按钮上） */}
+        {marked && noteCtl.editing && noteCtl.dirty ? (
+          // 正在编辑已标记词的笔记：主按钮就是「保存」
+          <button
+            type="button"
+            onClick={noteCtl.save}
+            className={`shrink-0 rounded-md bg-ink font-medium text-white transition hover:bg-stone-700 active:scale-95 ${large ? 'px-4 py-2.5 text-sm' : 'px-3 py-1.5 text-xs'}`}
+          >
+            保存
+          </button>
+        ) : (
+        /* 再次点击即可取消标记；已标记时悬停提示“取消标记”（触屏没有悬停，直接写在按钮上） */
         <button
           type="button"
           aria-pressed={marked}
@@ -110,6 +160,7 @@ function LookupContent({ selection, lookup, marked, onToggleMark, noteCtl, large
             'Mark 标记生词'
           )}
         </button>
+        )}
       </div>
     </>
   )
@@ -196,7 +247,7 @@ function FloatingTooltip({ selection, lookup, marked, onToggleMark, noteCtl, ref
     setPos({ top, left, placeBelow, arrowX })
     // status 变化时（加载中 → 结果 / 出错）气泡高度会变，需要重新计算位置
     // 笔记框展开时气泡也会变高，同样要重新定位
-  }, [anchor, ref, text, lookup.status, noteCtl.open])
+  }, [anchor, ref, text, lookup.status, noteCtl.open, noteCtl.editing, marked, noteCtl.note])
 
   return (
     <div
@@ -227,23 +278,48 @@ function FloatingTooltip({ selection, lookup, marked, onToggleMark, noteCtl, ref
 export default function SelectionTooltip({ selection, marked, note = '', onToggleMark, onSaveNote, ref }) {
   const lookup = useLookup(selection.text, selection.context)
 
-  // 笔记状态放在最外层：已有笔记时默认展开
-  const [open, setOpen] = useState(!!note)
+  const [open, setOpen] = useState(false) // 还没标记时，是否展开了笔记输入框
+  const [editing, setEditing] = useState(false) // 已标记时，是否正在编辑笔记
   const [draft, setDraft] = useState(note)
-  const [saved, setSaved] = useState(false)
-  const dirty = marked && draft.trim() !== note.trim()
+
+  // 标记 / 取消标记之后：退出编辑状态，草稿同步为已保存的笔记（标记就等于保存）
+  const [prevMarked, setPrevMarked] = useState(marked)
+  if (marked !== prevMarked) {
+    setPrevMarked(marked)
+    setEditing(false)
+    setDraft(note)
+  }
+
+  const dirty = marked && editing && draft.trim() !== note.trim()
   const save = async () => {
     await onSaveNote?.(draft)
-    setSaved(true)
+    setEditing(false)
   }
-  // 气泡关闭（卸载）时：已标记的词有没保存的修改，自动保存
+  // 气泡关闭（卸载）时：已标记的词还有没保存的修改，自动保存一次，防止白写
   const pending = useRef(null)
   useEffect(() => {
     pending.current = dirty ? () => onSaveNote?.(draft) : null
   })
   useEffect(() => () => pending.current?.(), [])
 
-  const noteCtl = { open, setOpen, draft, setDraft: (v) => (setDraft(v), setSaved(false)), dirty, save, saved }
+  const noteCtl = {
+    open,
+    setOpen,
+    editing,
+    startEditing: () => {
+      setDraft(note)
+      setEditing(true)
+    },
+    cancelEditing: () => {
+      setDraft(note)
+      setEditing(false)
+    },
+    draft,
+    setDraft,
+    note,
+    dirty,
+    save,
+  }
   const Shell = selection.input === 'touch' ? BottomSheet : FloatingTooltip
   return <Shell selection={selection} lookup={lookup} marked={marked} onToggleMark={onToggleMark} noteCtl={noteCtl} ref={ref} />
 }
