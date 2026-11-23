@@ -127,7 +127,11 @@ export default function HelpPage() {
               点击气泡里的 <strong className="text-stone-800">Mark 标记生词</strong>
               ，这个词连同它所在的原句会存进生词本，正文里所有出现的地方都会高亮。
             </li>
-            <li>再次划选已标记的词，按钮显示「已标记 ✓」，再点一次即可取消标记（有笔记时会先确认）。</li>
+            <li>
+              <strong className="text-stone-800">单击已高亮的词</strong>直接弹出意思，不用重新划选。高亮的是词组（如 <code>a wealth of</code>
+              ）时，单击其中任意位置查的是整个词组；想只查其中某个词，<strong className="text-stone-800">双击</strong>那个词或拖选它。
+            </li>
+            <li>再次选中（或单击）已标记的词，按钮显示「已标记 ✓」，再点一次即可取消标记（有笔记时会先确认）。</li>
             <li>
               <strong className="text-stone-800">笔记</strong>：气泡里点「📝 添加笔记」，写这个词在这里的意思、例句、联想。还没标记的词，点 Mark 时和单词一起保存（Mark 就是保存）；已标记的词再次选中会显示「📝 我的笔记」，点「编辑」修改，改完点「保存」，点「取消」放弃修改。笔记会同步到其他设备，复习时卡片背面也会显示。
             </li>
@@ -316,6 +320,9 @@ export default function HelpPage() {
           <ul className="list-disc space-y-1.5 pl-5">
             <li>
               <strong className="text-stone-800">点按单词</strong>：直接查词，释义从屏幕底部弹出
+            </li>
+            <li>
+              <strong className="text-stone-800">点按高亮</strong>：查整个高亮的词或词组；想查词组里的单个词，长按选中它
             </li>
             <li>
               <strong className="text-stone-800">长按并拖动选区</strong>：查词组或整句，松手约半秒后弹出

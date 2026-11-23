@@ -127,9 +127,35 @@ function rangeContainsPoint(range, x, y, slop = 4) {
 const sameRange = (a, b) =>
   a.compareBoundaryPoints(Range.START_TO_START, b) === 0 && a.compareBoundaryPoints(Range.END_TO_END, b) === 0
 
+/**
+ * 点中的是不是已高亮的词 / 词组：是的话返回覆盖整个高亮的 Range，否则返回 null。
+ * 词组碰上段落里的加粗等标签时，mark.js 会拆成几个紧挨着的 <mark>，这里把它们合并回一个整体
+ */
+function highlightRangeAt(target, container) {
+  const mark = target?.closest?.('mark[data-markjs]')
+  if (!mark || !container?.contains(mark)) return null
+  const block = blockOf(mark)
+  const marks = block ? [...block.querySelectorAll('mark[data-markjs]')] : [mark]
+  const gapEmpty = (a, b) => {
+    const r = document.createRange()
+    r.setStartAfter(a)
+    r.setEndBefore(b)
+    return r.toString() === ''
+  }
+  let i = marks.indexOf(mark)
+  let j = i
+  while (i > 0 && gapEmpty(marks[i - 1], marks[i])) i--
+  while (j < marks.length - 1 && gapEmpty(marks[j], marks[j + 1])) j++
+  const range = document.createRange()
+  range.setStartBefore(marks[i])
+  range.setEndAfter(marks[j])
+  return range.toString().trim() ? range : null
+}
+
 const TAP_MAX_MOVE = 10 // 手指移动超过 10px 就不算“点按”（是在滚动）
 const TAP_MAX_MS = 500 // 按住超过 0.5 秒就不算“点按”（是长按选词）
 const TOUCH_SETTLE_MS = 400 // 触屏拖动选区时，停手 0.4 秒后再弹出翻译
+const DOUBLE_CLICK_MS = 250 // 单击高亮后等这么久，没有第二下才当单击（有第二下就是双击查单词）
 
 /**
  * 监听 containerRef 内的划词，返回选中的文本、它在页面上的坐标，以及输入方式（mouse / touch）。
@@ -138,6 +164,8 @@ const TOUCH_SETTLE_MS = 400 // 触屏拖动选区时，停手 0.4 秒后再弹�
  * - 鼠标：mouseup 时读取选区
  * - 触屏（iPhone / iPad）：没有 mouseup，改为监听 selectionchange（长按选词、拖动选区手柄），
  *   停手后再弹出；另外支持“点按单词直接查词”
+ * - 已高亮的词 / 词组：单击（触屏轻点）直接弹出整个高亮的意思，不用重新划选；
+ *   双击高亮里的某个词、或拖动划选其中一部分，则只查选中的部分
  */
 export function useTextSelection(containerRef, ignoreRef) {
   const [selection, setSelection] = useState(null)
@@ -152,6 +180,7 @@ export function useTextSelection(containerRef, ignoreRef) {
     let pointerType = 'mouse' // 最近一次操作用的是鼠标还是手指
     let down = null // 最近一次按下的位置和时间，用来判断是不是“点按”
     let settleTimer = null
+    let clickTimer = null // 单击高亮后的等待计时，第二下点击会取消它
     let lastWidth = window.innerWidth
 
     /** 把（已吸附到完整单词的）range 显示为选区，并弹出气泡 */
@@ -208,15 +237,31 @@ export function useTextSelection(containerRef, ignoreRef) {
     const handlePointerDown = (e) => {
       pointerType = e.pointerType === 'mouse' ? 'mouse' : 'touch' // Apple Pencil 也按触屏处理
       down = { x: e.clientX, y: e.clientY, t: e.timeStamp }
+      clearTimeout(clickTimer) // 又按下了一次：可能是双击的第二下，取消“单击高亮”
       if (!isInside(ignoreRef, e.target)) setSelection(null)
     }
 
     // 鼠标松开：读取选区。触屏点按后浏览器也会补发一个 mouseup，要忽略
     const handleMouseUp = (e) => {
       if (pointerType !== 'mouse' || isInside(ignoreRef, e.target)) return
+      const target = e.target
+      const single = e.detail === 1
       // 点在已有选区上时，浏览器要等 mouseup 结束后才折叠选区，
       // 所以推迟到下一帧再读，拿到的才是最新状态
-      requestAnimationFrame(() => showCurrentSelection('mouse'))
+      requestAnimationFrame(() => {
+        const sel = window.getSelection()
+        // 单击高亮（没有拖出选区）：稍等一下，确认不是双击，再弹出整个高亮词组
+        if (single && (!sel || sel.isCollapsed || !sel.toString().trim())) {
+          const range = highlightRangeAt(target, containerRef.current)
+          if (range) {
+            clearTimeout(clickTimer)
+            clickTimer = setTimeout(() => show(range, 'mouse'), DOUBLE_CLICK_MS)
+            return
+          }
+        }
+        // 拖动划选、双击（浏览器自动选中那个单词）：按选中的内容查
+        showCurrentSelection('mouse')
+      })
     }
 
     // 触屏点按：找到手指下的单词，直接查词
@@ -227,6 +272,9 @@ export function useTextSelection(containerRef, ignoreRef) {
       const { clientX: x, clientY: y } = e
       // 等浏览器处理完这次点按（它可能会清掉旧选区）再设置新选区
       setTimeout(() => {
+        // 点在高亮上：查整个高亮词组（想查其中单个词，长按划选）
+        const highlight = highlightRangeAt(e.target, containerRef.current)
+        if (highlight) return show(highlight, 'touch')
         const caret = caretRangeAt(x, y)
         if (!caret || !isInside(containerRef, caret.startContainer)) return
         const word = snapToWords(caret)
@@ -261,6 +309,7 @@ export function useTextSelection(containerRef, ignoreRef) {
     window.addEventListener('resize', handleResize)
     return () => {
       clearTimeout(settleTimer)
+      clearTimeout(clickTimer)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('pointerup', handlePointerUp)
       document.removeEventListener('mouseup', handleMouseUp)
