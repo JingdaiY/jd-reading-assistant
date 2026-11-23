@@ -73,6 +73,13 @@ function ReviewCard({ word, revealedAt, onReveal, onRate }) {
             {word.translation || '（暂无释义）'}
           </p>
           {word.etymology && <p className="mt-2 text-sm text-stone-500">词根：{word.etymology}</p>}
+          {word.note && (
+            // 自己写的笔记：往往比词典释义更能帮你回忆起来
+            <p className="mt-4 rounded-lg bg-amber-50/70 px-4 py-3 text-sm leading-relaxed whitespace-pre-line text-stone-700">
+              <span className="mr-1.5 text-xs font-medium text-amber-700">📝 我的笔记</span>
+              {word.note}
+            </p>
+          )}
           {word.source && <p className="mt-4 text-xs text-stone-400">出自《{word.source}》</p>}
         </div>
       )}

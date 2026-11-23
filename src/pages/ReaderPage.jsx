@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import PdfViewer from '../components/PdfViewer'
 import Reader from '../components/Reader'
 import SelectionTooltip from '../components/SelectionTooltip'
-import { toggleWord } from '../db'
+import { toggleWord, updateWordNote } from '../db'
 import { getArticle, getArticles, getCurrentArticleId, SAMPLE, SAMPLE_CONTENT, saveProgress, setCurrentArticleId } from '../db/articles'
 import { useEpubImages } from '../hooks/useEpubImages'
 import { useHighlights } from '../hooks/useHighlights'
@@ -187,10 +187,16 @@ export default function ReaderPage({ words }) {
     )
   }
 
-  const isMarked = (text) => words.some((w) => w.word.toLowerCase() === text.toLowerCase())
+  // 这个词是否已标记（返回生词记录，气泡里要显示它的笔记）
+  const findMarked = (text) => words.find((w) => w.word.toLowerCase() === text.toLowerCase()) ?? null
+  const markedWord = selection ? findMarked(selection.text) : null
 
-  const handleToggleMark = ({ text, context, translation, phonetic, pos, etymology }) =>
-    toggleWord({ word: text, context, translation, phonetic, pos, etymology, source: article.title })
+  const handleToggleMark = ({ text, context, translation, phonetic, pos, etymology, note }) => {
+    const existing = findMarked(text)
+    // 取消标记会连笔记一起删掉：有笔记时先确认
+    if (existing?.note && !window.confirm(`取消标记「${existing.word}」？你写的笔记也会一起删除。`)) return
+    return toggleWord({ word: text, context, translation, phonetic, pos, etymology, note, source: article.title })
+  }
 
   return (
     <>
@@ -219,7 +225,9 @@ export default function ReaderPage({ words }) {
           key={`${selection.text}-${selection.anchor.top}-${selection.anchor.centerX}`}
           ref={tooltipRef}
           selection={selection}
-          marked={isMarked(selection.text)}
+          marked={!!markedWord}
+          note={markedWord?.note ?? ''}
+          onSaveNote={(note) => markedWord && updateWordNote(markedWord.id, note)}
           onToggleMark={handleToggleMark}
         />
       )}

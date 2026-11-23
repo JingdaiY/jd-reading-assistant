@@ -71,7 +71,7 @@ export const nowIso = () => new Date().toISOString()
 export const isActive = (r) => !r.deletedAt
 
 /** 按设计文档的数据结构创建一条生词记录 */
-export function createWordRecord({ word, translation, context, phonetic, pos, etymology, source }) {
+export function createWordRecord({ word, translation, context, phonetic, pos, etymology, source, note }) {
   const now = new Date()
   return {
     id: crypto.randomUUID(),
@@ -82,6 +82,7 @@ export function createWordRecord({ word, translation, context, phonetic, pos, et
     pos: pos ?? null,
     etymology: etymology ?? null,
     source,
+    note: note?.trim() || '', // 用户自己写的笔记（在这里的意思、例句、联想……），会同步
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     deletedAt: null,
@@ -156,6 +157,12 @@ export async function updateWordInfo(id, { translation, phonetic, pos, etymology
     etymology: etymology ?? null,
     updatedAt: nowIso(),
   })
+  markDirty()
+}
+
+/** 保存 / 修改生词的笔记（会更新修改时间，从而同步到其他设备） */
+export async function updateWordNote(id, note) {
+  await db.words.update(id, { note: note.trim(), updatedAt: nowIso() })
   markDirty()
 }
 

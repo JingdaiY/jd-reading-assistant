@@ -1,5 +1,5 @@
 import { REMIND_AFTER_DAYS, REMIND_AFTER_WORDS } from '../db/backupReminder'
-import { LEARN_AHEAD_MS } from '../srs'
+import { FAMILIAR_STABILITY_DAYS, LEARN_AHEAD_MS } from '../srs'
 
 const LEARN_AHEAD_MIN = LEARN_AHEAD_MS / 60000
 
@@ -127,7 +127,10 @@ export default function HelpPage() {
               点击气泡里的 <strong className="text-stone-800">Mark 标记生词</strong>
               ，这个词连同它所在的原句会存进生词本，正文里所有出现的地方都会高亮。
             </li>
-            <li>再次划选已标记的词，按钮显示「已标记 ✓」，再点一次即可取消标记。</li>
+            <li>再次划选已标记的词，按钮显示「已标记 ✓」，再点一次即可取消标记（有笔记时会先确认）。</li>
+            <li>
+              <strong className="text-stone-800">笔记</strong>：气泡里点「📝 添加笔记」，写这个词在这里的意思、例句、联想。还没标记的词，点 Mark 时和单词一起保存；已标记的词再次选中会显示笔记，修改后点「保存笔记」或直接关闭气泡都会保存。笔记会同步到其他设备，复习时卡片背面也会显示。
+            </li>
             <li>
               点击空白处或按 <Kbd>Esc</Kbd> 关闭气泡。
             </li>
@@ -210,6 +213,10 @@ export default function HelpPage() {
           <Note>
             紫色<strong>不代表已经掌握</strong>：一个刚忘掉、正在重新学习的词也是紫色。黄色的词说明还没开始复习，可以去「每日复习」过一遍。
           </Note>
+          <p>
+            <strong className="text-stone-800">记熟的词不再高亮</strong>：复习时连续记住、记忆稳定性达到 {FAMILIAR_STABILITY_DAYS}{' '}
+            天的词（一路按「认识」大约在第 4 次复习后），正文里就不再高亮，避免满屏都是标记。它仍然在生词本里、仍然会按计划出现在每日复习里；如果之后复习时按了「忘记」，高亮会自动恢复。在词汇库里可以用「已熟悉」筛选查看这些词。
+          </p>
           <p className="text-sm text-stone-500">
             高亮只匹配完全相同的词（忽略大小写），不识别词形变化：标记 <code>atrophy</code> 不会高亮 <code>atrophies</code>。
           </p>
@@ -260,7 +267,7 @@ export default function HelpPage() {
               <strong className="text-stone-800">搜索</strong>单词、释义或原句；按状态<strong className="text-stone-800">筛选</strong>
               （新词、学习中、复习、已到期、缺释义、疑似残缺）；按最近添加、字母顺序或下次复习时间<strong className="text-stone-800">排序</strong>
             </li>
-            <li>点一个词展开详情：完整释义、词根、原句、出处、复习次数和遗忘次数</li>
+            <li>点一个词展开详情：完整释义、词根、你的笔记（可以直接修改）、原句、出处、复习次数和遗忘次数；列表里也会显示笔记的第一行，搜索会搜笔记</li>
             <li>
               <strong className="text-stone-800">删除</strong>：复习进度会一起删除；连接了 Google Drive 时，其他设备上也会同步删除
             </li>

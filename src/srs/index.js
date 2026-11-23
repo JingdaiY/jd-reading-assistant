@@ -13,6 +13,11 @@ export const GRADES = [
 // 评分后如果下次到期时间在 20 分钟内（学习阶段的短间隔），本轮复习里再出现一次（同 Anki 的 learn ahead）
 export const LEARN_AHEAD_MS = 20 * 60 * 1000
 
+// 已熟悉：FSRS 的稳定性（大约能记住多少天）达到 30 天的词，正文里不再高亮。
+// 一路按「认识」大约在第 4 次复习后达到；之后如果按了「忘记」，稳定性会掉下来，高亮自动恢复
+export const FAMILIAR_STABILITY_DAYS = 30
+export const isFamiliar = (w) => (w.stability ?? 0) >= FAMILIAR_STABILITY_DAYS
+
 /** 数据库记录 → ts-fsrs 的 Card（旧记录缺字段时补默认值） */
 export function toCard(record) {
   return {

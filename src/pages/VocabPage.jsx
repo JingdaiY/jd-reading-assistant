@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
-import { CardState, deleteWord, needsDefinition, updateWordInfo } from '../db'
+import { CardState, deleteWord, needsDefinition, updateWordInfo, updateWordNote } from '../db'
 import { lookup } from '../services/translate'
 import { getSettings, modeLabel, useSettings } from '../settings'
-import { formatInterval } from '../srs'
+import { formatInterval, isFamiliar } from '../srs'
 import { isLikelyFragment, splitContext } from '../utils/text'
 
 const STATE_LABEL = {
@@ -19,6 +19,8 @@ const FILTERS = [
   { id: 'review', label: '复习', test: (w) => w.state === CardState.Review },
   { id: 'due', label: '已到期', test: (w, now) => Date.parse(w.due) <= now },
   { id: 'nodef', label: '缺释义', test: (w) => needsDefinition(w) },
+  { id: 'note', label: '有笔记', test: (w) => !!w.note?.trim() },
+  { id: 'familiar', label: '已熟悉', test: (w) => isFamiliar(w) },
   { id: 'fragment', label: '疑似残缺', test: (w) => isLikelyFragment(w.word, w.context) },
 ]
 
@@ -39,6 +41,28 @@ function Badge({ children, tone = 'stone' }) {
   return <span className={`rounded px-1.5 py-px text-[11px] ${tones[tone]}`}>{children}</span>
 }
 
+/** 词汇库里编辑笔记 */
+function NoteEditor({ w }) {
+  const [draft, setDraft] = useState(w.note ?? '')
+  const dirty = draft.trim() !== (w.note ?? '').trim()
+  return (
+    <div>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={2}
+        placeholder="笔记：在这里的意思、例句、联想……"
+        className="w-full resize-none rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-base leading-relaxed text-stone-700 outline-none focus:border-stone-400 sm:text-sm"
+      />
+      {dirty && (
+        <button type="button" onClick={() => updateWordNote(w.id, draft)} className="mt-1 rounded-md bg-ink px-3 py-1 text-xs text-white hover:bg-stone-700">
+          保存笔记
+        </button>
+      )}
+    </div>
+  )
+}
+
 function WordRow({ w, now, expanded, onToggle, onRequery, onDelete, busy }) {
   const fragment = isLikelyFragment(w.word, w.context)
   const noDef = needsDefinition(w)
@@ -55,12 +79,14 @@ function WordRow({ w, now, expanded, onToggle, onRequery, onDelete, busy }) {
             <Badge>{STATE_LABEL[w.state] ?? '新词'}</Badge>
             {fragment && <Badge tone="rose">疑似残缺</Badge>}
             {noDef && <Badge tone="amber">缺释义</Badge>}
+            {isFamiliar(w) && <Badge>已熟悉 · 不高亮</Badge>}
           </div>
           {!expanded && (
             <p className="mt-0.5 truncate text-sm text-stone-500">
               {noDef ? '（没有释义）' : w.translation.split('\n')[0]}
             </p>
           )}
+          {!expanded && w.note && <p className="mt-0.5 truncate text-xs text-stone-400">📝 {w.note}</p>}
         </div>
         <span className={`shrink-0 pt-1 text-xs ${due <= now ? 'text-amber-600' : 'text-stone-400'}`}>
           {due <= now ? '已到期' : `${formatInterval(due - now)}后`}
@@ -74,6 +100,7 @@ function WordRow({ w, now, expanded, onToggle, onRequery, onDelete, busy }) {
             {noDef ? '（没有释义）' : w.translation}
           </p>
           {w.etymology && <p className="text-xs text-stone-500">词根：{w.etymology}</p>}
+          <NoteEditor w={w} />
           {w.context && (
             <p className="font-serif leading-relaxed text-stone-600">
               {parts ? (
@@ -138,7 +165,7 @@ export default function VocabPage({ words }) {
     const test = FILTERS.find((f) => f.id === filter).test
     return words
       .filter((w) => test(w, now))
-      .filter((w) => !q || [w.word, w.translation, w.context].some((s) => s?.toLowerCase().includes(q)))
+      .filter((w) => !q || [w.word, w.translation, w.context, w.note].some((s) => s?.toLowerCase().includes(q)))
       .sort(SORTS.find((s) => s.id === sort).fn)
   }, [words, query, filter, sort, now])
 
@@ -247,7 +274,7 @@ export default function VocabPage({ words }) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索单词、释义或原句"
+          placeholder="搜索单词、释义、原句或笔记"
           className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-3 py-2 text-base outline-none focus:border-stone-400 sm:text-sm"
         />
         <select
