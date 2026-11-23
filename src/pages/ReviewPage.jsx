@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CardState, getDueWords, saveReview, updateWordNote } from '../db'
+import { CardState, db, getDueWords, saveReview, updateWordNote } from '../db'
 import { useNow } from '../hooks/useNow'
-import { formatInterval, grade, GRADES, LEARN_AHEAD_MS, previewNext } from '../srs'
+import { formatInterval, fromCard, grade, GRADES, LEARN_AHEAD_MS, previewNext, toCard } from '../srs'
 import { splitContext } from '../utils/text'
 
 const STATE_LABEL = {
@@ -105,7 +105,7 @@ function ReviewNote({ word, onSaveNote }) {
   )
 }
 
-function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote }) {
+function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote, onBack }) {
   const parts = splitContext(word.context, word.word)
   const revealed = revealedAt !== null
   // 以“翻开答案的时刻”为基准预览各评分的下次复习时间
@@ -158,7 +158,21 @@ function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote }) {
       )}
 
       {/* ===== 操作区 ===== */}
-      <div className="mt-10">
+      {/* 左边「‹ 上一个」，右边显示答案 / 评分按钮，宽度 1 : 4 */}
+      <div className="mt-10 grid grid-cols-[1fr_4fr] gap-2 sm:gap-3">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onBack?.()
+          }}
+          disabled={!onBack}
+          title={onBack ? '回到上一个词（撤销上一次评分）' : '已经是本轮第一个词'}
+          className="flex flex-col items-center justify-center gap-1 rounded-xl border border-stone-200 text-sm text-stone-500 transition hover:bg-stone-100 hover:text-stone-800 active:scale-[0.98] disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <span>‹ 上一个</span>
+          <Kbd>Z</Kbd>
+        </button>
         {!revealed ? (
           <button
             type="button"
@@ -166,7 +180,7 @@ function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote }) {
               e.stopPropagation()
               onReveal()
             }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-3 text-sm font-medium text-white transition hover:bg-stone-700 active:scale-[0.99]"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-ink py-3 pointer-coarse:py-4 text-sm font-medium text-white transition hover:bg-stone-700 active:scale-[0.99]"
           >
             显示答案
             <kbd className="rounded bg-white/15 px-1.5 py-0.5 text-[10px] text-white/70 pointer-coarse:hidden">空格</kbd>
@@ -193,11 +207,12 @@ function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote }) {
   )
 }
 
-function EmptyState({ title, desc }) {
+function EmptyState({ title, desc, children }) {
   return (
     <div className="animate-pop py-24 text-center">
       <p className="font-serif text-2xl font-semibold text-stone-900">{title}</p>
       <p className="mt-3 text-sm text-stone-500">{desc}</p>
+      {children}
       <a
         href="#/"
         className="mt-8 inline-block rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100"
@@ -216,6 +231,9 @@ export default function ReviewPage({ words }) {
   const [finished, setFinished] = useState(0) // 本轮已完成（不再出现）的词数
   const [reviews, setReviews] = useState(0) // 本轮总评分次数
   const busy = useRef(false) // 防止连按快捷键对同一张卡评两次分
+  // 本轮的评分记录，用来「‹ 上一个」：每次评分前存一份 { word: 评分前的记录, queue, finished, reviews }。
+  // 只能退到本轮第一个词；离开复习页就清空
+  const [history, setHistory] = useState([])
   const now = useNow()
 
   useEffect(() => {
@@ -235,6 +253,7 @@ export default function ReviewPage({ words }) {
       try {
         const reviewedAt = new Date()
         const fields = grade(current, rating, reviewedAt)
+        setHistory((h) => [...h, { word: current, queue, finished, reviews }])
         await saveReview(current.id, fields)
 
         // 下次到期在 20 分钟内（学习阶段的短间隔）→ 排到队尾，本轮再复习一次
@@ -247,8 +266,28 @@ export default function ReviewPage({ words }) {
         busy.current = false
       }
     },
-    [current],
+    [current, queue, finished, reviews],
   )
+
+  // 回到上一个词：把它的复习进度恢复成评分前的样子，再翻开答案让你重新评分（不会算成复习了两次）
+  const back = useCallback(async () => {
+    const last = history.at(-1)
+    if (!last || busy.current) return
+    busy.current = true
+    try {
+      await saveReview(last.word.id, fromCard(toCard(last.word)))
+      // 笔记以数据库里的为准：评分之后写的笔记（包括翻到下一张时自动保存的）不会被撤销
+      const notes = new Map((await db.words.bulkGet(last.queue.map((w) => w.id))).filter(Boolean).map((w) => [w.id, w.note]))
+      setQueue(last.queue.map((w) => ({ ...w, note: notes.get(w.id) ?? w.note })))
+      setFinished(last.finished)
+      setReviews(last.reviews)
+      setHistory((h) => h.slice(0, -1))
+      setRevealedAt(Date.now())
+    } finally {
+      busy.current = false
+    }
+  }, [history])
+  const canBack = history.length > 0
 
   // 保存笔记：写数据库，同时更新本轮队列里这个词的副本（队列是进入页面时的快照，排到队尾的那份也要带上新笔记）
   const currentId = current?.id
@@ -264,8 +303,10 @@ export default function ReviewPage({ words }) {
   // 快捷键：空格 / 回车 显示答案；1 2 3 评分（正在输入笔记时不触发，打数字不会把卡片评分掉）
   useEffect(() => {
     const onKey = (e) => {
-      if (!current || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.target.closest?.('input, textarea, select, [contenteditable]')) return
+      if (e.key === 'z' || e.key === 'Z') return back()
+      if (!current) return
       if (!revealed && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault()
         setRevealedAt(Date.now())
@@ -276,7 +317,7 @@ export default function ReviewPage({ words }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, revealed, rate])
+  }, [current, revealed, rate, back])
 
   if (queue === null) return null
 
@@ -290,10 +331,19 @@ export default function ReviewPage({ words }) {
         onReveal={() => setRevealedAt(Date.now())}
         onRate={rate}
         onSaveNote={saveNote}
+        onBack={canBack ? back : null}
       />
     )
   } else if (reviews > 0) {
-    body = <EmptyState title="本轮复习完成 🎉" desc={`复习了 ${finished} 个词，共评分 ${reviews} 次`} />
+    body = (
+      <EmptyState title="本轮复习完成 🎉" desc={`复习了 ${finished} 个词，共评分 ${reviews} 次`}>
+        {canBack && (
+          <button type="button" onClick={back} className="mt-8 mr-2 inline-block rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100">
+            ‹ 回到上一个
+          </button>
+        )}
+      </EmptyState>
+    )
   } else if (words.length === 0) {
     body = <EmptyState title="生词本还是空的" desc="在阅读页划选单词，点击 Mark 标记后就会出现在这里" />
   } else {
@@ -332,7 +382,7 @@ export default function ReviewPage({ words }) {
 
       {current && (
         <p className="mt-6 text-center text-xs text-stone-400 pointer-coarse:hidden">
-          快捷键：<Kbd>空格</Kbd> 显示答案 · <Kbd>1</Kbd> 忘记 <Kbd>2</Kbd> 模糊 <Kbd>3</Kbd> 认识
+          快捷键：<Kbd>空格</Kbd> 显示答案 · <Kbd>1</Kbd> 忘记 <Kbd>2</Kbd> 模糊 <Kbd>3</Kbd> 认识 · <Kbd>Z</Kbd> 上一个
         </p>
       )}
     </main>

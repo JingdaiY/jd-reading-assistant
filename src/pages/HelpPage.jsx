@@ -244,6 +244,10 @@ export default function HelpPage() {
               按 <Kbd>空格</Kbd> 翻开答案：中文释义、词性（有词根时也会显示）。
             </li>
             <li>按记忆程度评分，每个按钮下方会显示「选它的话，下次多久后复习」。</li>
+            <li>
+              评错了或想再看一眼上一个词：点左边的<strong className="text-stone-800">「‹ 上一个」</strong>（或按 <Kbd>Z</Kbd>
+              ），回到上一个词并翻开答案，上一次的评分会被撤销，重新评分即可。本轮里可以一直往回退，最多退到本轮第一个词；离开复习页后就不能再退了。笔记不受影响。
+            </li>
           </ol>
           <Table
             head={['按钮', '意思', '效果']}
@@ -371,6 +375,7 @@ export default function HelpPage() {
                 </span>,
                 '忘记 / 模糊 / 认识',
               ],
+              ['每日复习', <Kbd key="z">Z</Kbd>, '回到上一个词（撤销上一次评分）'],
               ['⚙️ 菜单', <Kbd key="d">Esc</Kbd>, '关闭菜单'],
             ]}
           />
