@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CardState, getDueWords, saveReview } from '../db'
+import { CardState, getDueWords, saveReview, updateWordNote } from '../db'
 import { useNow } from '../hooks/useNow'
 import { formatInterval, grade, GRADES, LEARN_AHEAD_MS, previewNext } from '../srs'
 import { splitContext } from '../utils/text'
@@ -26,7 +26,86 @@ function Kbd({ children }) {
   )
 }
 
-function ReviewCard({ word, revealedAt, onReveal, onRate }) {
+// 打开输入框时把光标放到末尾（只在刚挂载时做一次）
+const caretToEnd = (el) => {
+  if (!el || el.dataset.focused) return
+  el.dataset.focused = '1'
+  el.focus()
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
+/**
+ * 卡片背面的笔记：没有笔记时「添加笔记」，有笔记时显示「我的笔记」+「编辑」。
+ * 编辑中：保存 / 取消。没点保存就评分、翻到下一张（卡片卸载）时自动保存，不会丢
+ */
+function ReviewNote({ word, onSaveNote }) {
+  const note = word.note ?? ''
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(note)
+  const dirty = editing && draft.trim() !== note.trim()
+
+  // 卸载时如果还有没保存的修改，自动保存
+  const pending = useRef(null)
+  useEffect(() => {
+    pending.current = dirty ? draft : null
+  })
+  useEffect(() => () => pending.current !== null && onSaveNote(pending.current), [onSaveNote])
+
+  const save = () => {
+    if (dirty) onSaveNote(draft)
+    pending.current = null
+    setEditing(false)
+  }
+  const cancel = () => {
+    setDraft(note)
+    setEditing(false)
+  }
+  const small = 'rounded-md px-2.5 py-1 text-xs transition-colors'
+
+  if (editing) {
+    return (
+      <div className="mt-4">
+        <textarea
+          ref={caretToEnd}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={3}
+          placeholder="在这里的意思、例句、联想……"
+          className="w-full resize-none rounded-lg border border-amber-200 bg-amber-50/40 px-3 py-2 text-base leading-relaxed text-stone-700 outline-none focus:border-amber-400 sm:text-sm"
+        />
+        <div className="mt-1.5 flex justify-end gap-2">
+          <button type="button" onClick={cancel} className={`${small} text-stone-500 hover:bg-stone-100`}>
+            取消
+          </button>
+          <button type="button" onClick={save} disabled={!dirty} className={`${small} bg-ink text-white hover:bg-stone-700 disabled:opacity-40`}>
+            保存
+          </button>
+        </div>
+      </div>
+    )
+  }
+  if (!note) {
+    return (
+      <button type="button" onClick={() => setEditing(true)} className="mt-4 rounded-lg px-2 py-1 text-sm text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800">
+        📝 添加笔记
+      </button>
+    )
+  }
+  return (
+    // 自己写的笔记：往往比词典释义更能帮你回忆起来
+    <div className="mt-4 rounded-lg bg-amber-50/70 px-4 py-3 text-sm leading-relaxed text-stone-700">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-xs font-medium text-amber-700">📝 我的笔记</span>
+        <button type="button" onClick={() => setEditing(true)} className={`${small} -my-1 text-amber-700 hover:bg-amber-100`}>
+          编辑
+        </button>
+      </div>
+      <p className="whitespace-pre-line">{note}</p>
+    </div>
+  )
+}
+
+function ReviewCard({ word, revealedAt, onReveal, onRate, onSaveNote }) {
   const parts = splitContext(word.context, word.word)
   const revealed = revealedAt !== null
   // 以“翻开答案的时刻”为基准预览各评分的下次复习时间
@@ -73,13 +152,7 @@ function ReviewCard({ word, revealedAt, onReveal, onRate }) {
             {word.translation || '（暂无释义）'}
           </p>
           {word.etymology && <p className="mt-2 text-sm text-stone-500">词根：{word.etymology}</p>}
-          {word.note && (
-            // 自己写的笔记：往往比词典释义更能帮你回忆起来
-            <p className="mt-4 rounded-lg bg-amber-50/70 px-4 py-3 text-sm leading-relaxed whitespace-pre-line text-stone-700">
-              <span className="mr-1.5 text-xs font-medium text-amber-700">📝 我的笔记</span>
-              {word.note}
-            </p>
-          )}
+          <ReviewNote word={word} onSaveNote={onSaveNote} />
           {word.source && <p className="mt-4 text-xs text-stone-400">出自《{word.source}》</p>}
         </div>
       )}
@@ -177,10 +250,22 @@ export default function ReviewPage({ words }) {
     [current],
   )
 
-  // 快捷键：空格 / 回车 显示答案；1 2 3 评分
+  // 保存笔记：写数据库，同时更新本轮队列里这个词的副本（队列是进入页面时的快照，排到队尾的那份也要带上新笔记）
+  const currentId = current?.id
+  const saveNote = useCallback(
+    (note) => {
+      if (!currentId) return
+      updateWordNote(currentId, note)
+      setQueue((q) => q?.map((w) => (w.id === currentId ? { ...w, note: note.trim() } : w)))
+    },
+    [currentId],
+  )
+
+  // 快捷键：空格 / 回车 显示答案；1 2 3 评分（正在输入笔记时不触发，打数字不会把卡片评分掉）
   useEffect(() => {
     const onKey = (e) => {
       if (!current || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.target.closest?.('input, textarea, select, [contenteditable]')) return
       if (!revealed && (e.key === ' ' || e.key === 'Enter')) {
         e.preventDefault()
         setRevealedAt(Date.now())
@@ -204,6 +289,7 @@ export default function ReviewPage({ words }) {
         revealedAt={revealedAt}
         onReveal={() => setRevealedAt(Date.now())}
         onRate={rate}
+        onSaveNote={saveNote}
       />
     )
   } else if (reviews > 0) {
