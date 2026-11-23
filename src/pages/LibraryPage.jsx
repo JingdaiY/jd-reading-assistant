@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
 import { addArticle, deleteArticle, getArticles, getLocalCacheState, SAMPLE, setCurrentArticleId } from '../db/articles'
-import StorageCard, { formatBytes } from '../components/StorageCard'
+import { formatBytes } from '../components/StorageMenu'
 import { parseFile, parseText } from '../services/importer'
 import { useSyncState } from '../sync'
 
@@ -117,13 +117,17 @@ export default function LibraryPage() {
     'rounded-lg border border-stone-200 px-4 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100 active:scale-[0.98]'
 
   return (
-    <main className="mx-auto max-w-2xl px-4 pt-10 pb-32 sm:px-6 sm:pt-16">
+    <main className="mx-auto max-w-2xl px-4 pt-6 pb-32 sm:px-6 sm:pt-10">
+      <a
+        href="#/"
+        className="mb-6 inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-600 shadow-sm transition-colors hover:bg-stone-100 hover:text-stone-900"
+      >
+        <span aria-hidden>‹</span> 返回阅读
+      </a>
       <p className="text-xs font-medium tracking-widest text-stone-400 uppercase">Library</p>
       <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-stone-900">书架</h1>
 
-      <StorageCard />
-
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-8 flex flex-wrap gap-2">
         <button type="button" className={pasting ? secondary : primary} onClick={() => setPasting((v) => !v)}>
           {pasting ? '收起' : '粘贴文本'}
         </button>

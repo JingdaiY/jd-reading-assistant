@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useState } from 'react'
+import { usePopover } from '../hooks/usePopover'
 import { db, isActive } from '../db'
 import { CACHE_BOOKS, getArticles, getLocalCacheState } from '../db/articles'
 import { getCloudUsage, useSyncState } from '../sync'
@@ -52,11 +53,11 @@ function Bar({ used, limit }) {
 }
 
 /**
- * 书架顶部的「💾 存储空间」：本机（浏览器存储）和 Google Drive 各占了多少。
- * 收起时一行总量；展开时分项，并读取云端（需要联网，所以只在展开时读）
+ * 导航栏「存储」：按钮上显示本机占用总量，点开显示本机（浏览器存储）和 Google Drive 各占多少。
+ * 云端数据要联网读取，只在打开时读；上次读到的结果存在本机，下次打开先显示
  */
-export default function StorageCard() {
-  const [open, setOpen] = useState(false)
+export default function StorageMenu() {
+  const { open, setOpen, ref } = usePopover()
   const local = useLiveQuery(getLocalUsage, [], null)
   const sync = useSyncState()
   const [estimate, setEstimate] = useState(null) // 浏览器给出的整体用量 / 上限
@@ -91,30 +92,29 @@ export default function StorageCard() {
     }
   }, [open, sync.connected, sync.status, sync.lastSyncAt, refresh])
 
-  const hasCloud = sync.connected && cloud.total != null
-  const summary = [local && `本机 ${formatBytes(local.total)}`, sync.connected ? (hasCloud ? `云端 ${formatBytes(cloud.total)}` : '云端 展开查看') : null]
-    .filter(Boolean)
-    .join(' · ')
-
   return (
-    <section className="mt-6 rounded-xl border border-stone-200/80 bg-white/70 text-sm">
+    <div ref={ref} className="relative">
       <button
         type="button"
         aria-expanded={open}
+        aria-label="存储空间"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-stone-50"
+        className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm whitespace-nowrap outline-none max-[400px]:px-1.5 sm:px-2.5 transition-colors hover:bg-stone-100 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-stone-300 ${
+          open ? 'bg-stone-100 text-stone-900' : 'text-stone-500'
+        }`}
       >
-        <span className="font-medium text-stone-700">💾 存储空间</span>
-        <span className="flex items-center gap-2 text-xs text-stone-500">
-          {summary}
-          <span aria-hidden className={`text-stone-400 transition-transform ${open ? 'rotate-90' : ''}`}>
-            ›
-          </span>
-        </span>
+        存储
+        {/* 手机上导航栏放不下，只显示「存储」两个字 */}
+        {local && <span className="hidden rounded bg-stone-100 px-1.5 py-px text-[11px] text-stone-500 tabular-nums sm:inline">{formatBytes(local.total)}</span>}
       </button>
 
       {open && local && (
-        <div className="grid gap-4 border-t border-stone-200/70 px-4 py-3 text-xs sm:grid-cols-2 sm:gap-6">
+        <div
+          role="menu"
+          aria-label="存储空间"
+          className="fixed inset-x-3 top-16 max-h-[calc(100dvh-5rem)] overflow-y-auto sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 origin-top-right animate-pop sm:w-80 space-y-4 rounded-xl border border-stone-200/80 bg-white p-4 text-xs shadow-[0_8px_30px_rgba(0,0,0,0.08)]"
+        >
+          <p className="text-[11px] font-medium tracking-wide text-stone-400 uppercase">存储空间</p>
           {/* ===== 本机 ===== */}
           <div>
             <p className="mb-1 font-medium text-stone-700">本机（这个浏览器）</p>
@@ -133,17 +133,17 @@ export default function StorageCard() {
               </>
             )}
             <p className="mt-2 leading-relaxed text-stone-400">
-              本机最多缓存 {CACHE_BOOKS} 本书；超出时，已上传到云端的旧书会自动清掉本机副本，下次打开再下载。
+              这里是浏览器存在硬盘上的数据，不是运行内存。本机最多缓存 {CACHE_BOOKS} 本书；超出时，已上传到云端的旧书会自动清掉本机副本，下次打开再下载。
             </p>
           </div>
 
           {/* ===== Google Drive ===== */}
-          <div>
+          <div className="border-t border-stone-100 pt-3">
             <p className="mb-1 font-medium text-stone-700">Google Drive</p>
             {!sync.connected ? (
-              <p className="leading-relaxed text-stone-400">未连接。在右上角 ⚙️ 菜单里连接 Google Drive 后，这里会显示云端占用。</p>
+              <p className="leading-relaxed text-stone-400">未连接。点右上角的 ☁️ 连接 Google Drive 后，这里会显示云端占用。</p>
             ) : sync.status === 'expired' ? (
-              <p className="leading-relaxed text-amber-600">授权已过期：在 ⚙️ 菜单里点「重新连接」后再查看。</p>
+              <p className="leading-relaxed text-amber-600">授权已过期：点右上角的 ☁️「重新连接」后再查看。</p>
             ) : (
               <>
                 {cloud.total != null && (
@@ -181,8 +181,14 @@ export default function StorageCard() {
               </>
             )}
           </div>
+          <p className="border-t border-stone-100 pt-3 text-stone-400">
+            每本书的大小和存放位置：见
+            <a href="#/library" onClick={() => setOpen(false)} className="ml-1 text-stone-600 underline hover:text-stone-900">
+              书架
+            </a>
+          </p>
         </div>
       )}
-    </section>
+    </div>
   )
 }

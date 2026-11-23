@@ -88,7 +88,7 @@ export default function HelpPage() {
       <div className="mt-12 space-y-14">
         <Section id="library" title="书架与导入">
           <p>
-            阅读页左上角点「📚 书架 · 导入」进入书架，可以导入自己的阅读材料，点书名打开：
+            阅读页左上角点「📚 书架 · 导入」进入书架（左上角「‹ 返回阅读」回到阅读页），可以导入自己的阅读材料，点书名打开：
           </p>
           <ul className="list-disc space-y-1.5 pl-5">
             <li>
@@ -109,7 +109,7 @@ export default function HelpPage() {
             <Kbd>←</Kbd> <Kbd>→</Kbd> 翻页。每本书会记住读到的章节、页码和位置。
           </p>
           <p>
-            书架顶部的<strong className="text-stone-800">「💾 存储空间」</strong>
+            导航栏「模式」右边的<strong className="text-stone-800">「存储」</strong>
             显示本机（这个浏览器）和 Google Drive 各占了多少空间，点开看分项：书的正文、原始 PDF / EPUB、生词本。连接 Google Drive 时还会显示整个 Drive 的已用 / 总量（读不到时会说明）。这里的「本机」是浏览器存在硬盘上的数据，不是运行内存。每本书后面也会标出它的大小，以及存在哪里：「本机 + 云端」「☁️ 仅云端」（打开时下载）「仅本机」「仅本机 · 待上传」。
           </p>
           <Note>
@@ -300,7 +300,7 @@ export default function HelpPage() {
             里，刷新、关闭浏览器、重启电脑都不会丢；但换一台设备、换一个浏览器，或者清除浏览器数据后就看不到了。
           </p>
           <p>
-            <strong className="text-stone-800">Google Drive 同步（推荐）</strong>：点右上角的云朵图标（或 ⚙️）→「连接 Google Drive」，用你自己的 Google 账号授权。云朵是绿色带勾表示已同步，橙色表示需要重新连接。生词本、复习进度和文章库会存到
+            <strong className="text-stone-800">Google Drive 同步（推荐）</strong>：点右上角的云朵图标 ☁️ →「连接 Google Drive」（同步相关的操作都在 ☁️ 里，⚙️ 里是生词本和备份），用你自己的 Google 账号授权。云朵是绿色带勾表示已同步，橙色表示需要重新连接。生词本、复习进度和文章库会存到
             <strong className="text-stone-800">你自己 Drive 里的隐藏应用文件夹</strong>
             （在 Drive 里看不到，只有本应用能读写），在每台设备上连接同一个 Google 账号就会自动同步：打开应用时、标记 / 复习后约 3 秒、切回页面时。
           </p>
@@ -311,7 +311,7 @@ export default function HelpPage() {
             </li>
             <li>在书架上删除一本书，云端的那份也会一起删除</li>
             <li>API Key 和查词模式不同步，每台设备单独设置</li>
-            <li>授权约 1 小时过期，过期后 ⚙️ 上会出现小圆点，点「重新连接」即可</li>
+            <li>授权约 1 小时过期，过期后 ☁️ 上会出现橙色小圆点，点开 ☁️ →「重新连接」即可</li>
             <li>「断开」只是停止同步，本机和 Drive 上的数据都会保留</li>
             <li>
               「查看云端数据」：显示云端和本机各有多少生词、文章，以及云端最后更新的时间，可以确认两边是否一致；也可以下载云端的原始文件。同步文件存在 Drive 的隐藏文件夹里，在 Google Drive 网页上看不到

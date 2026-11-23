@@ -4,6 +4,7 @@ import { formatAgo, getBackupStatus, getLastBackupAt } from '../db/backupReminde
 import { usePopover } from '../hooks/usePopover'
 import { connect, disconnect, downloadCloudFile, getCloudSummary, syncNow, useSyncState } from '../sync'
 import ModeMenu from './ModeMenu'
+import StorageMenu from './StorageMenu'
 
 function GearIcon() {
   return (
@@ -105,7 +106,7 @@ function CloudPanel() {
   )
 }
 
-/** ⚙️ 菜单里的 Google Drive 同步区域 */
+/** ☁️ 菜单里的 Google Drive 同步区域 */
 function SyncSection({ sync }) {
   const [showCloud, setShowCloud] = useState(false)
   const smallBtn = 'rounded-md px-2.5 py-1.5 text-xs font-medium transition active:scale-95'
@@ -187,13 +188,15 @@ function NavLink({ href, active, children }) {
 }
 
 export default function Navbar({ words, dueCount, route }) {
-  const { open, setOpen, ref: menuRef } = usePopover()
+  const { open, setOpen, ref: menuRef } = usePopover() // ⚙️ 设置：生词本、备份
+  const { open: cloudOpen, setOpen: setCloudOpen, ref: cloudRef } = usePopover() // ☁️ Google Drive 同步
   const [lastBackupAt, setLastBackupAt] = useState(getLastBackupAt)
   const sync = useSyncState()
   // 已连接 Drive 自动同步时，不再提醒手动备份
   const backup = sync.connected ? { needsBackup: false } : getBackupStatus(words, lastBackupAt)
-  // 授权过期需要用户点「重新连接」：在 ⚙️ 上也显示提醒圆点
-  const needsAttention = backup.needsBackup || sync.status === 'expired'
+  // 提醒圆点：⚙️ 上只表示有生词没备份；Drive 授权过期 / 同步出错显示在 ☁️ 上
+  const needsAttention = backup.needsBackup
+  const cloudAttention = sync.connected && (sync.status === 'expired' || sync.status === 'error')
   const [message, setMessage] = useState(null) // { type: 'ok' | 'error', text }
   const fileRef = useRef(null)
 
@@ -249,19 +252,19 @@ export default function Navbar({ words, dueCount, route }) {
             <span className="hidden sm:inline">词汇库</span>
           </NavLink>
           <ModeMenu />
+          <StorageMenu />
           <span className="mx-1 h-4 w-px bg-stone-200 max-[400px]:hidden sm:mx-1.5" />
 
-        <div ref={menuRef} className="relative flex items-center">
-          {/* 同步状态：一眼看出有没有连接 Drive，点击打开同一个菜单 */}
+        <div className="flex items-center">
+        <div ref={cloudRef} className="relative">
+          {/* ☁️ Google Drive 同步：一眼看出有没有连接，点开是同步状态和操作 */}
           <button
             type="button"
+            aria-expanded={cloudOpen}
             aria-label={sync.connected ? `Google Drive 同步：${SYNC_LABEL[sync.status] ?? ''}` : '连接 Google Drive 同步'}
             title={sync.connected ? `Google Drive：${SYNC_LABEL[sync.status] ?? ''}` : '连接 Google Drive，在多台设备间同步'}
-            onClick={() => {
-              setOpen((v) => !v)
-              setMessage(null)
-            }}
-            className={`rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 max-[400px]:p-1.5 ${
+            onClick={() => setCloudOpen((v) => !v)}
+            className={`relative rounded-md p-2 transition-colors hover:bg-stone-100 hover:text-stone-700 max-[400px]:p-1.5 ${cloudOpen ? 'bg-stone-100' : ''} ${
               sync.status === 'expired' || sync.status === 'error'
                 ? 'text-amber-600'
                 : sync.connected
@@ -270,12 +273,25 @@ export default function Navbar({ words, dueCount, route }) {
             }`}
           >
             <CloudIcon status={sync.status} connected={sync.connected} />
+            {cloudAttention && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-amber-500 ring-2 ring-paper" />}
           </button>
+          {cloudOpen && (
+            <div
+              role="menu"
+              aria-label="Google Drive 同步"
+              className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 origin-top-right animate-pop sm:w-72 rounded-xl border border-stone-200/80 bg-white p-1.5 pt-2.5 shadow-[0_8px_30px_rgba(0,0,0,0.08)]"
+            >
+              <SyncSection sync={sync} />
+            </div>
+          )}
+        </div>
+
+        <div ref={menuRef} className="relative">
           <button
             type="button"
             aria-label={needsAttention ? '设置（需要处理）' : '设置'}
             aria-expanded={open}
-            title={sync.status === 'expired' ? 'Google Drive 授权已过期' : backup.needsBackup ? `有 ${backup.unsavedCount} 个生词未备份` : '设置'}
+            title={backup.needsBackup ? `有 ${backup.unsavedCount} 个生词未备份` : '设置'}
             onClick={() => {
               setOpen((v) => !v)
               setMessage(null)
@@ -303,8 +319,6 @@ export default function Navbar({ words, dueCount, route }) {
                 <span>上次备份：{formatAgo(lastBackupAt)}</span>
               </div>
 
-              <SyncSection sync={sync} />
-
               {backup.needsBackup && (
                 <div className="mx-1 mb-1 rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-800">
                   有 {backup.unsavedCount} 个生词还没备份，建议导出一份，以防清除浏览器数据后丢失。
@@ -330,6 +344,7 @@ export default function Navbar({ words, dueCount, route }) {
               )}
             </div>
           )}
+        </div>
         </div>
         </div>
       </nav>
