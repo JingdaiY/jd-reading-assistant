@@ -15,6 +15,7 @@ import {
   requestToken,
   revokeToken,
   uploadFile,
+  getDriveQuota,
 } from './google'
 import { articleKey, mergeRecords, wordKey } from './merge'
 
@@ -255,6 +256,30 @@ export function startAutoSync() {
  * 读取 Drive 上的同步数据，和本机对比。书的正文 / 原始文件只统计数量和大小，不下载。
  * 返回 { cloud: { words, deletedWords, articles, updatedAt, bytes, bookFiles, bookBytes } | null, local: { words, articles }, raw }
  */
+/**
+ * 本应用在 Google Drive 上占用的空间（存储空间卡片用）：
+ * { indexBytes, bookFiles, bookBytes, total, files: Map(文件名 → 大小), quota: { usage, limit } | null }
+ */
+export async function getCloudUsage() {
+  try {
+    const [files, quota] = await Promise.all([listAppFiles(), getDriveQuota()])
+    const index = files.get(INDEX_FILE)
+    const books = [...files].filter(([name]) => name !== INDEX_FILE)
+    const bookBytes = books.reduce((n, [, f]) => n + f.size, 0)
+    return {
+      indexBytes: index?.size ?? 0,
+      bookFiles: books.length,
+      bookBytes,
+      total: (index?.size ?? 0) + bookBytes,
+      names: new Set(files.keys()),
+      quota,
+    }
+  } catch (err) {
+    if (err instanceof AuthError) setState({ status: 'expired' })
+    throw err
+  }
+}
+
 export async function getCloudSummary() {
   if (!getToken()) {
     setState({ status: 'expired' })

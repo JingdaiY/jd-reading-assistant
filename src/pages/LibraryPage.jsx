@@ -1,7 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useRef, useState } from 'react'
 import { addArticle, deleteArticle, getArticles, getLocalCacheState, SAMPLE, setCurrentArticleId } from '../db/articles'
+import StorageCard, { formatBytes } from '../components/StorageCard'
 import { parseFile, parseText } from '../services/importer'
+import { useSyncState } from '../sync'
 
 const KIND_LABEL = { sample: '示例', paste: '粘贴', txt: 'TXT', epub: 'EPUB', pdf: 'PDF' }
 
@@ -10,9 +12,16 @@ function open(id) {
   window.location.hash = '#/'
 }
 
-const formatSize = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
-function ArticleRow({ article, local, onDelete }) {
+// 这本书存在哪里：正文是否在本机、是否已上传到 Google Drive
+const WHERE = {
+  both: { label: '本机 + 云端', className: 'bg-emerald-50 text-emerald-700' },
+  cloud: { label: '☁️ 仅云端', className: 'bg-sky-50 text-sky-700' },
+  local: { label: '仅本机', className: 'bg-stone-100 text-stone-500' },
+  pending: { label: '仅本机 · 待上传', className: 'bg-amber-50 text-amber-700' },
+}
+
+function ArticleRow({ article, where, onDelete }) {
   const total = article.chapterCount ?? 1
   const chapter = (article.progress?.chapter ?? 0) + 1
   const words = article.wordCount ?? 0
@@ -24,9 +33,15 @@ function ArticleRow({ article, local, onDelete }) {
           <span className="rounded bg-stone-100 px-1.5 py-px text-stone-500">{KIND_LABEL[article.kind] ?? article.kind}</span>
           {article.author && <span>{article.author}</span>}
           <span>{words.toLocaleString()} 词</span>
-          {article.originalSize && <span>原文件 {formatSize(article.originalSize)}</span>}
-          {/* 正文不在本机：打开时会从 Google Drive 下载 */}
-          {local === false && <span className="rounded bg-sky-50 px-1.5 py-px text-sky-700">☁️ 云端</span>}
+          {/* 大小：正文 + 原始文件（都来自元数据，不读取正文） */}
+          {article.contentSize || article.originalSize ? (
+            <span title={[article.contentSize && `正文 ${formatBytes(article.contentSize)}`, article.originalSize && `原文件 ${formatBytes(article.originalSize)}`].filter(Boolean).join(' · ')}>
+              {formatBytes((article.contentSize ?? 0) + (article.originalSize ?? 0))}
+              {article.originalSize ? `（原文件 ${formatBytes(article.originalSize)}）` : ''}
+            </span>
+          ) : null}
+          {/* 在哪里：仅云端的书打开时会从 Google Drive 下载 */}
+          {where && <span className={`rounded px-1.5 py-px ${WHERE[where].className}`}>{WHERE[where].label}</span>}
           {total > 1 && (
             <span>
               读到第 {chapter} / {total} 章
@@ -51,6 +66,13 @@ export default function LibraryPage() {
   const articles = useLiveQuery(getArticles, [], [])
   // 哪些书的正文在本机（书架只读元数据和主键，不会把正文读进内存）
   const cache = useLiveQuery(getLocalCacheState, [], null)
+  const sync = useSyncState()
+  const whereOf = (id) => {
+    if (!cache) return undefined
+    if (!cache.contents.has(id)) return 'cloud'
+    if (cache.uploaded.has(id)) return 'both'
+    return sync.connected ? 'pending' : 'local'
+  }
   const [pasting, setPasting] = useState(false)
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
@@ -99,7 +121,9 @@ export default function LibraryPage() {
       <p className="text-xs font-medium tracking-widest text-stone-400 uppercase">Library</p>
       <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-stone-900">书架</h1>
 
-      <div className="mt-8 flex flex-wrap gap-2">
+      <StorageCard />
+
+      <div className="mt-6 flex flex-wrap gap-2">
         <button type="button" className={pasting ? secondary : primary} onClick={() => setPasting((v) => !v)}>
           {pasting ? '收起' : '粘贴文本'}
         </button>
@@ -144,7 +168,7 @@ export default function LibraryPage() {
 
       <ul className="mt-8 divide-y divide-stone-200/70 border-y border-stone-200/70">
         {articles.map((a) => (
-          <ArticleRow key={a.id} article={a} local={cache ? cache.contents.has(a.id) : undefined} onDelete={handleDelete} />
+          <ArticleRow key={a.id} article={a} where={whereOf(a.id)} onDelete={handleDelete} />
         ))}
         <ArticleRow article={SAMPLE} />
       </ul>

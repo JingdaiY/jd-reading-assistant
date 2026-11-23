@@ -127,6 +127,22 @@ export async function listAppFiles() {
   return files
 }
 
+/**
+ * 整个 Google Drive 的用量 { usage, limit }（字节；limit 为 null 表示不限量）。
+ * 现在的授权只允许访问应用自己的隐藏文件夹，Google 不一定让读整个 Drive 的用量：拿不到时返回 null
+ */
+export async function getDriveQuota() {
+  try {
+    const res = await driveFetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota')
+    const q = (await res.json()).storageQuota
+    if (!q?.usage) return null
+    return { usage: Number(q.usage), limit: q.limit ? Number(q.limit) : null }
+  } catch (err) {
+    if (err instanceof AuthError) throw err
+    return null
+  }
+}
+
 /** 下载文件：as = 'json' | 'blob' */
 export async function downloadFile(id, as = 'json') {
   const res = await driveFetch(`${API}/${id}?alt=media`)

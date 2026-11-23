@@ -58,8 +58,13 @@ export async function getArticle(id) {
 
 /** 哪些书的正文 / 原始文件在本机（书架显示“本机 / 云端”用） */
 export async function getLocalCacheState() {
-  const [contents, originals] = await Promise.all([db.contents.toCollection().primaryKeys(), db.originals.toCollection().primaryKeys()])
-  return { contents: new Set(contents), originals: new Set(originals) }
+  // 只读主键和 uploaded 索引，不把正文 / 文件读进内存
+  const [contents, originals, uploaded] = await Promise.all([
+    db.contents.toCollection().primaryKeys(),
+    db.originals.toCollection().primaryKeys(),
+    db.contents.where('uploaded').equals(1).primaryKeys(),
+  ])
+  return { contents: new Set(contents), originals: new Set(originals), uploaded: new Set(uploaded) }
 }
 
 /**
